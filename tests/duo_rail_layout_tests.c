@@ -316,38 +316,65 @@ int main(void) {
     Check(!ApolloDuoRailRowStarBindingIsStale(1, 1, 1),
           "the current subreddit with a live button is not stale");
     Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 940.0) == 60.0,
-          "overlapping right chrome becomes a contentView trailing inset");
+          "a trailing-half minX still converts to an inset");
     Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 80.0) == 0.0,
           "the leading Open rail is not a trailing inset");
     Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 1000.0) == 0.0,
-          "chrome past the trailing edge is not an inset");
+          "a guide at content.maxX is not a trailingInsetFromMinX inset");
     Check(ApolloDuoRailRowTrailingInsetFromMinX(400.0, 0.0) == 0.0,
           "a missing chrome minX is not an inset");
-    Check(ApolloDuoRailRowStarConstraintTrailing(16.0, 0.0, 8.0) == 16.0,
-          "A–Z width wins over the floor when there is no rail overlap");
-    Check(ApolloDuoRailRowStarConstraintTrailing(16.0, 56.0, 8.0) == 56.0,
-          "overlapping right nav rail wins over A–Z");
-    Check(ApolloDuoRailRowStarConstraintTrailing(0.0, 0.0, 8.0) == 8.0,
-          "no A–Z / rail still keeps the 8pt floor");
-    Check(ApolloDuoRailRowStarConstraintTrailing(16.0, 56.0, 8.0)
+    Check(ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0) == 24.0,
+          "full-bleed content pins star maxX to index leading minus gap");
+    Check(1013.0 - ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0)
+              == 997.0 - 8.0,
+          "star maxX is the live A–Z leading edge minus the gap");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(997.0, 997.0, 16.0, 8.0) == 24.0,
+          "already-inset contentView still reserves index width + gap");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(997.0, 1100.0, 16.0, 8.0) == 24.0,
+          "an index past content.maxX still reserves index width + gap");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0)
+              > (double)ApolloDuoRailRowStarMinTrailing,
+          "Open trailing never collapses to the 8pt floor when an index strip exists");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0)
+              >= 16.0 + 8.0,
+          "trailing is at least the index-leading clear (width + gap)");
+    Check(ApolloDuoRailRowStarTrailingCollapsesToFloor(8.0, 8.0, 16.0),
+          "8pt trailing with a live index strip is the reuse bug");
+    Check(!ApolloDuoRailRowStarTrailingCollapsesToFloor(24.0, 8.0, 16.0),
+          "index-pinned trailing is not the floor");
+    Check(!ApolloDuoRailRowStarTrailingCollapsesToFloor(8.0, 8.0, 0.0),
+          "the floor is allowed only when no index strip exists");
+    Check(ApolloDuoRailRowStarClearLeading(997.0, 940.0) == 940.0,
+          "a trailing rail inland of A–Z is the tighter guide");
+    Check(ApolloDuoRailRowStarClearLeading(997.0, 0.0) == 997.0,
+          "A–Z leading is the guide when the rail is leading-side");
+    Check(ApolloDuoRailRowStarClearLeading(0.0, 0.0) == 0.0,
+          "no live guide leaves leading at 0 for the mode reserve");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeClosed, 16.0, 8.0, 56.0) == 24.0,
+          "Closed reserve is A–Z + gap only (stock tabs, no crushing rail)");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeOpen, 16.0, 8.0, 0.0) == 24.0,
+          "Open without a trailing rail is A–Z + gap");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeOpen, 16.0, 8.0, 56.0) == 80.0,
+          "Open adds a measured trailing-rail clear only when that rail exists");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeOpen, 16.0, 8.0, 56.0)
               != ApolloDuoRailClosedOverlayClearance(),
-          "live trailing is not the removed Closed overlay reservation");
+          "mode reserve is not the removed Closed overlay reservation");
     Check(ApolloDuoRailRowIndexConstraintInset(16.0, 0.0) == 16.0,
-          "full-bleed contentView uses the live A–Z inset");
-    Check(ApolloDuoRailRowIndexConstraintInset(16.0, 16.0) == 0.0,
-          "an already-inset contentView does not add the A–Z strip twice");
-    Check(ApolloDuoRailRowShouldUpdateStarTrailing(-8.0, -56.0),
-          "trailing constant updates when A–Z / rail geometry changes");
-    Check(!ApolloDuoRailRowShouldUpdateStarTrailing(-16.0, -16.0),
-          "unchanged live trailing is a no-op");
+          "full-bleed contentView keeps the live A–Z inset");
+    Check(ApolloDuoRailRowIndexConstraintInset(16.0, 16.0) == 16.0,
+          "already-inset contentView must not zero the A–Z inset");
+    Check(ApolloDuoRailRowShouldUpdateStarTrailing(-8.0, -24.0),
+          "trailing constant updates when the live index leading changes");
+    Check(!ApolloDuoRailRowShouldUpdateStarTrailing(-24.0, -24.0),
+          "unchanged index-leading trailing is a no-op");
     Check(ApolloDuoRailRowStarShouldShowFilled(1, 0),
           "a name in FavoriteSubreddits shows a filled star");
     Check(ApolloDuoRailRowStarShouldShowFilled(0, 1),
           "a Favorites-section row shows a filled star");
     Check(!ApolloDuoRailRowStarShouldShowFilled(0, 0),
           "an unfavorited A–Z row shows an outline star");
-    Check(ApolloDuoRailRowStarButtonTrailing() == (double)ApolloDuoRailRowStarMinTrailing,
-          "custom star floor is the 8pt min-trailing inset");
+    Check(ApolloDuoRailRowStarButtonTrailing() == (double)ApolloDuoRailRowStarIndexGap,
+          "custom star gap is 8pt left of the live A–Z leading edge");
     Check(ApolloDuoRailRowStarButtonSize == 28 && ApolloDuoRailRowStarButtonHit == 44,
           "custom star glyph is 28pt inside a 44pt hit target");
     Check(ApolloDuoCoverPillWidth == 80 && ApolloDuoCoverPillBottom == 120,

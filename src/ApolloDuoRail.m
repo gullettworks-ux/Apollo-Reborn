@@ -36,12 +36,13 @@ static void ApolloDuoRailCustomStarTapped(ApolloDuoStarButton *button);
 // Selected item uses the theme accent (blue on stock) as a rounded
 // pill. FeedSplit tiling stays off. After rail/safe-area insets,
 // RedditList hides Apollo's native star and installs a custom
-// Auto Layout star immediately left of A–Z and clear of the
-// floating nav rail (Open + Closed). Native stays in-tree as the
-// favorite source of truth; taps forward to it. Every configure,
-// willDisplay, and Open↔Closed pass tears down a stale association
-// and reapplies the live trailing constant — reuse never keeps a
-// prior cell's frame or subreddit binding. Closed has no side rail.
+// Auto Layout star whose trailing edge is the live A–Z leading
+// edge minus a small gap (Open + Closed). Native stays in-tree as
+// the favorite source of truth; taps forward to it. Every
+// configure, willDisplay, and Open↔Closed pass tears down a stale
+// association and recomputes from the live index / trailing-rail
+// frames — reuse never keeps a prior cell's geometry. Closed has
+// no side rail.
 //
 // Mode keys off UIWindow.bounds (never UIScreen.mainScreen). First
 // show defaults to Subs: stock popToRoot onto RedditList. Navigation
@@ -1056,112 +1057,86 @@ static UIView *ApolloDuoRailSectionIndexView(UITableView *tableView) {
     return nil;
 }
 
-static BOOL ApolloDuoRailViewLooksLikeTrailingChrome(UIView *view) {
-    if (!view || view.hidden || view.alpha < 0.05) return NO;
-    const char *name = class_getName(view.class);
-    if (!name) return NO;
-    if (strstr(name, "DuoRailView") || strstr(name, "DuoStarButton")
-        || strstr(name, "StarHitProxy") || strstr(name, "TableViewIndex")
-        || strstr(name, "UITableView") || strstr(name, "UITableViewCell")
-        || strstr(name, "RedditList") || strstr(name, "NavigationBar")
-        || strstr(name, "UINavigationBar")) {
-        return NO;
-    }
-    if (strstr(name, "TabContainer") || strstr(name, "FloatingTab")
-        || strstr(name, "TabBar") || strstr(name, "Sidebar")
-        || [view isKindOfClass:[UITabBar class]]) {
-        return YES;
-    }
-    CGFloat width = CGRectGetWidth(view.bounds);
-    CGFloat height = CGRectGetHeight(view.bounds);
-    return width >= 36.0 && width <= 160.0 && height >= 160.0;
+static UIView *ApolloDuoRailInstalledView(void) {
+    UITabBarController *tabs = (UITabBarController *)ApolloMainTabBarController();
+    if (![tabs isKindOfClass:[UITabBarController class]]) return nil;
+    UIView *rail = objc_getAssociatedObject(tabs, &kApolloDuoRailViewKey);
+    if (!rail || !rail.superview || rail.hidden || rail.alpha < 0.05) return nil;
+    return rail;
 }
 
-static void ApolloDuoRailCollectChromeMinX(UIView *view,
-                                          UIView *content,
-                                          CGFloat contentWidth,
-                                          CGFloat *bestMinX,
-                                          NSInteger *inspected,
-                                          NSInteger depth) {
-    if (!view || !content || !bestMinX || !inspected || depth < 0) return;
-    if (*inspected > 80) return;
-    *inspected += 1;
-    if (view == content || [view isDescendantOfView:content]) return;
-
-    if (ApolloDuoRailViewLooksLikeTrailingChrome(view)) {
-        CGRect inContent = [content convertRect:view.bounds fromView:view];
-        if (CGRectGetWidth(inContent) >= 1.0 && CGRectGetHeight(inContent) >= 1.0
-            && CGRectGetMaxX(inContent) > contentWidth * 0.55
-            && CGRectGetMinX(inContent) < contentWidth + 8.0) {
-            CGFloat minX = CGRectGetMinX(inContent);
-            if (minX > contentWidth * 0.5 && (*bestMinX < 0.0 || minX < *bestMinX)) {
-                *bestMinX = minX;
-            }
-        }
-    }
-    for (UIView *subview in view.subviews) {
-        ApolloDuoRailCollectChromeMinX(subview, content, contentWidth, bestMinX,
-                                       inspected, depth - 1);
-    }
-}
-
-static CGFloat ApolloDuoRailLiveIndexInset(UITableViewCell *cell, UIView *content) {
+// Live A–Z leading edge in contentView space. Width is the index
+// strip even when convertRect parks the leading edge at/past
+// content.maxX (the false already-inset reuse frame).
+static CGFloat ApolloDuoRailIndexLeadingInContent(UITableViewCell *cell,
+                                                 UIView *content,
+                                                 CGFloat *outWidth) {
+    if (outWidth) *outWidth = 0.0;
     if (!cell || !content) return 0.0;
-    CGFloat contentWidth = CGRectGetWidth(content.bounds);
-    if (contentWidth < 1.0) contentWidth = CGRectGetWidth(cell.contentView.bounds);
-    if (contentWidth < 1.0) return 0.0;
-
-    CGFloat alreadyInset = (CGFloat)ApolloDuoRailRowIndexStrip((double)CGRectGetWidth(cell.bounds),
-                                                              (double)CGRectGetMaxX(content.frame));
     UITableView *table = ApolloDuoRailTableForCell(cell);
     UIView *index = ApolloDuoRailSectionIndexView(table);
-    CGFloat fromIndex = 0.0;
-    if (index && !index.hidden && CGRectGetWidth(index.bounds) > 0.5) {
-        CGRect inContent = [content convertRect:index.bounds fromView:index];
-        fromIndex = (CGFloat)ApolloDuoRailRowTrailingInsetFromMinX((double)contentWidth,
-                                                                  (double)CGRectGetMinX(inContent));
-        if (fromIndex < 0.5 && table) {
-            CGRect inTable = [table convertRect:index.bounds fromView:index];
-            if (CGRectGetMidX(inTable) > CGRectGetWidth(table.bounds) * 0.6) {
-                fromIndex = CGRectGetWidth(index.bounds);
-            }
-        }
-    }
-    return (CGFloat)ApolloDuoRailRowIndexConstraintInset((double)fromIndex, (double)alreadyInset);
+    if (!index || index.hidden || CGRectGetWidth(index.bounds) < 0.5) return 0.0;
+    if (outWidth) *outWidth = CGRectGetWidth(index.bounds);
+    CGRect inContent = [content convertRect:index.bounds fromView:index];
+    return CGRectGetMinX(inContent);
 }
 
-static CGFloat ApolloDuoRailLiveChromeInset(UITableViewCell *cell, UIView *content) {
-    if (!cell || !content) return 0.0;
-    CGFloat contentWidth = CGRectGetWidth(content.bounds);
-    if (contentWidth < 1.0) return 0.0;
-
-    CGFloat bestMinX = -1.0;
-    NSInteger inspected = 0;
-    UITabBarController *tabs = (UITabBarController *)ApolloMainTabBarController();
-    if ([tabs isKindOfClass:[UITabBarController class]] && tabs.isViewLoaded) {
-        ApolloDuoRailCollectChromeMinX(tabs.view, content, contentWidth, &bestMinX,
-                                       &inspected, 4);
-        if (tabs.tabBar) {
-            ApolloDuoRailCollectChromeMinX(tabs.tabBar, content, contentWidth, &bestMinX,
-                                           &inspected, 2);
-        }
-    }
-    if (bestMinX < 0.0 && cell.window) {
-        inspected = 0;
-        for (UIView *subview in cell.window.subviews) {
-            ApolloDuoRailCollectChromeMinX(subview, content, contentWidth, &bestMinX,
-                                           &inspected, 3);
-        }
-    }
-    return (CGFloat)ApolloDuoRailRowTrailingInsetFromMinX((double)contentWidth, (double)bestMinX);
+// ApolloDuoRailView only when it sits on the trailing half of this
+// contentView (a leading Open sidebar is not a trailing guide).
+static CGFloat ApolloDuoRailTrailingRailLeadingInContent(UIView *content,
+                                                        CGFloat contentWidth,
+                                                        CGFloat *outWidth) {
+    if (outWidth) *outWidth = 0.0;
+    if (!content || contentWidth < 1.0) return 0.0;
+    UIView *rail = ApolloDuoRailInstalledView();
+    if (!rail) return 0.0;
+    CGRect inContent = [content convertRect:rail.bounds fromView:rail];
+    if (CGRectGetMidX(inContent) <= contentWidth * 0.5) return 0.0;
+    if (outWidth) *outWidth = CGRectGetWidth(inContent);
+    return CGRectGetMinX(inContent);
 }
 
+// button.maxX = live index/rail leading − gap. Never inherits a
+// prior cell's trailing and never zeros the A–Z strip.
 static CGFloat ApolloDuoRailLiveStarTrailing(UITableViewCell *cell, UIView *content) {
-    CGFloat indexInset = ApolloDuoRailLiveIndexInset(cell, content);
-    CGFloat chromeInset = ApolloDuoRailLiveChromeInset(cell, content);
-    return (CGFloat)ApolloDuoRailRowStarConstraintTrailing((double)indexInset,
-                                                          (double)chromeInset,
-                                                          (double)ApolloDuoRailRowStarMinTrailing);
+    CGFloat contentWidth = content ? CGRectGetWidth(content.bounds) : 0.0;
+    if (contentWidth < 1.0 && cell) contentWidth = CGRectGetWidth(cell.bounds);
+    CGFloat gap = (CGFloat)ApolloDuoRailRowStarIndexGap;
+    CGFloat indexWidth = 0.0;
+    CGFloat railWidth = 0.0;
+    CGFloat indexLeading = ApolloDuoRailIndexLeadingInContent(cell, content, &indexWidth);
+    CGFloat railLeading = ApolloDuoRailTrailingRailLeadingInContent(content, contentWidth,
+                                                                   &railWidth);
+
+    CGFloat guideLeading = (CGFloat)ApolloDuoRailRowStarClearLeading((double)indexLeading,
+                                                                    (double)railLeading);
+    if (indexWidth > 0.5 || guideLeading > 0.5) {
+        CGFloat guideWidth = indexWidth > 0.5
+            ? indexWidth
+            : (railWidth > 0.5 ? railWidth : (CGFloat)ApolloDuoRailClosedIndexWidth);
+        CGFloat trailing = (CGFloat)ApolloDuoRailRowStarTrailingFromGuide((double)contentWidth,
+                                                                         (double)guideLeading,
+                                                                         (double)guideWidth,
+                                                                         (double)gap);
+        if (railLeading > 0.5 && railLeading + 0.5 < indexLeading) {
+            CGFloat railTrailing = (CGFloat)ApolloDuoRailRowStarTrailingFromGuide(
+                (double)contentWidth, (double)railLeading, (double)railWidth, (double)gap);
+            if (railTrailing > trailing) trailing = railTrailing;
+        }
+        return trailing;
+    }
+
+    CGFloat railClear = 0.0;
+    if (railLeading > 0.5) {
+        railClear = (CGFloat)ApolloDuoRailRowStarTrailingFromGuide((double)contentWidth,
+                                                                  (double)railLeading,
+                                                                  (double)railWidth,
+                                                                  0.0);
+    }
+    return (CGFloat)ApolloDuoRailRowStarModeReserve(ApolloDuoRailCurrentMode(),
+                                                   (double)ApolloDuoRailClosedIndexWidth,
+                                                   (double)gap,
+                                                   (double)railClear);
 }
 
 static void ApolloDuoRailInstallCustomStarConstraints(ApolloDuoStarButton *button,
@@ -1260,7 +1235,7 @@ static void ApolloDuoRailBindCustomStar(UITableViewCell *cell, BOOL reinstall) {
     ApolloDuoRailPaintCustomStar(button, filled);
     [content bringSubviewToFront:button];
     if (reinstall) {
-        ApolloLog(@"[ApolloDuoStar] bind name=%@ trailing=%.1f filled=%d",
+        ApolloLog(@"[ApolloDuoStar] bind name=%@ trailing=%.1f filled=%d (index-leading pin)",
                   name ?: @"(none)", trailing, filled ? 1 : 0);
     }
 }

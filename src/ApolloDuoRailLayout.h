@@ -42,12 +42,12 @@ enum {
     ApolloDuoRailRowStarRetryLimit = 3,
     ApolloDuoRailRowStarSearchFloor = 48,
     /* Custom Duo star (not the native accessory). Size is the glyph;
-       hit slop is the button itself. Pin to contentView.trailingAnchor
-       minus live A–Z + overlapping right-rail inset — never
-       layoutMarginsGuide (those shrink on scroll and collide with
-       the floating nav pill). */
+       hit slop is the button itself. Trailing is pinned to the live
+       UITableViewIndex leading edge minus this gap — never
+       contentView.trailing minus a fuzzy chrome/margin guess. */
     ApolloDuoRailRowStarButtonSize = 28,
     ApolloDuoRailRowStarButtonHit = 44,
+    ApolloDuoRailRowStarIndexGap = 8,
     ApolloDuoCoverPillWidth = 80,   /* cover system pill; Compact only */
     ApolloDuoCoverPillBottom = 120, /* lift FABs above the cover gear */
     /* Subs nav chrome (title / Edit / floating +). Insets only the
@@ -209,9 +209,10 @@ static inline double ApolloDuoRailClosedOverlayClearance(void) {
     return (double)ApolloDuoRailWidthClosed + (double)ApolloDuoRailClosedIndexWidth;
 }
 
-// Leftover helper: max(margins.right, A–Z strip, floor). Runtime no
-// longer uses layoutMargins — see ApolloDuoRailRowStarConstraintTrailing.
-// Host tests still lock this so a margins-only path cannot sneak back.
+// Leftover helper: max(margins.right, A–Z strip, floor). Runtime
+// stars pin to the live index leading edge
+// (ApolloDuoRailRowStarTrailingFromGuide), not this mix. Host tests
+// still lock it so a margins-only path cannot sneak back.
 static inline double ApolloDuoRailRowLiveStarTrailing(double marginRight,
                                                       double indexStrip,
                                                       double minTrailing) {
@@ -347,12 +348,12 @@ static inline int ApolloDuoRailRowStarShouldShowFilled(int inFavoritesList,
 }
 
 static inline double ApolloDuoRailRowStarButtonTrailing(void) {
-    return (double)ApolloDuoRailRowStarMinTrailing;
+    return (double)ApolloDuoRailRowStarIndexGap;
 }
 
-// View minX (already in contentView space) → trailing inset. 0 when
-// the view is missing, past the trailing edge, or on the leading
-// half (Open's left rail is not a trailing inset).
+// Leftover: view minX → trailing inset. Runtime stars no longer use
+// this as the column (it returned 0 when the index sat at/past
+// content.maxX). Host tests keep the leading-half filter.
 static inline double ApolloDuoRailRowTrailingInsetFromMinX(double contentWidth,
                                                            double minXInContent) {
     if (contentWidth <= 0.0) return 0.0;
@@ -361,9 +362,8 @@ static inline double ApolloDuoRailRowTrailingInsetFromMinX(double contentWidth,
     return contentWidth - minXInContent;
 }
 
-// contentView.trailingAnchor constant. max(A–Z inset, overlapping
-// right chrome) then at least the 8pt floor. Never layoutMargins
-// and never ClosedOverlayClearance.
+// Leftover max(index, chrome, floor). Do not use for custom stars —
+// that path collapsed to the 8pt floor when chrome was missed.
 static inline double ApolloDuoRailRowStarConstraintTrailing(double indexInset,
                                                             double chromeInset,
                                                             double minTrailing) {
@@ -376,13 +376,65 @@ static inline double ApolloDuoRailRowStarConstraintTrailing(double indexInset,
     return trailing;
 }
 
-// A–Z already ate contentView.width (index lives beside the cell).
-// Pinning to content.trailing is already left of the index — do not
-// add the strip a second time.
+// Never drop the A–Z inset because contentView "looks" inset.
+// contentAlreadyInset > 0.5 → 0 was the reuse/mode-change bug:
+// the flag was true while the index still overlapped the band.
 static inline double ApolloDuoRailRowIndexConstraintInset(double indexInsetInContent,
                                                           double contentAlreadyInset) {
-    if (contentAlreadyInset > 0.5) return 0.0;
+    (void)contentAlreadyInset;
     return indexInsetInContent > 0.0 ? indexInsetInContent : 0.0;
+}
+
+// button.maxX = guideLeading - gap, expressed as a
+// contentView.trailingAnchor constant. When the guide sits at or
+// past content.maxX (false "already inset" frames), still reserve
+// guideWidth + gap so trailing cannot collapse to the 8pt floor.
+static inline double ApolloDuoRailRowStarTrailingFromGuide(double contentWidth,
+                                                           double guideLeadingInContent,
+                                                           double guideWidth,
+                                                           double gap) {
+    if (gap < 0.0) gap = 0.0;
+    if (guideWidth < 0.0) guideWidth = 0.0;
+    double fromWidth = guideWidth + gap;
+    if (contentWidth <= 0.0) return fromWidth;
+    if (guideLeadingInContent <= 0.5) return fromWidth;
+    double fromLead = contentWidth - guideLeadingInContent + gap;
+    return fromLead > fromWidth ? fromLead : fromWidth;
+}
+
+// Leftmost live guide: A–Z leading, or a trailing-side rail leading.
+static inline double ApolloDuoRailRowStarClearLeading(double indexLeading,
+                                                      double railLeading) {
+    int haveIndex = indexLeading > 0.5;
+    int haveRail = railLeading > 0.5;
+    if (haveIndex && haveRail) {
+        return indexLeading < railLeading ? indexLeading : railLeading;
+    }
+    if (haveIndex) return indexLeading;
+    if (haveRail) return railLeading;
+    return 0.0;
+}
+
+// First-paint reserve when the index is not laid out yet. Closed is
+// A–Z + gap only (stock tabs). Open adds a trailing-rail clear only
+// when the caller measured a trailing-side ApolloDuoRailView.
+static inline double ApolloDuoRailRowStarModeReserve(int mode,
+                                                     double indexWidth,
+                                                     double gap,
+                                                     double trailingRailClear) {
+    if (indexWidth < 0.0) indexWidth = 0.0;
+    if (gap < 0.0) gap = 0.0;
+    if (trailingRailClear < 0.0) trailingRailClear = 0.0;
+    if (mode != ApolloDuoModeOpen) trailingRailClear = 0.0;
+    return indexWidth + trailingRailClear + gap;
+}
+
+// Smoking-gun detector: a live index strip must not park on the floor.
+static inline int ApolloDuoRailRowStarTrailingCollapsesToFloor(double trailing,
+                                                              double floorTrailing,
+                                                              double indexWidth) {
+    if (indexWidth <= 0.5) return 0;
+    return trailing <= floorTrailing + 0.5;
 }
 
 static inline int ApolloDuoRailRowShouldUpdateStarTrailing(double haveConstant,

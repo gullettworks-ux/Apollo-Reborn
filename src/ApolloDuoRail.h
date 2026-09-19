@@ -39,10 +39,10 @@ void ApolloDuoRailClearOpenContent(void);
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 
 /// Duo-only: tear down any stale star, bind the current subreddit,
-/// refresh filled/outline from Apollo, and reinstall the trailing
-/// Auto Layout constraint left of A–Z / clear of the floating rail.
-/// Call from cellForRow, willDisplay, and after Open↔Closed. No-op
-/// on Phone. No native frame writes.
+/// refresh filled/outline from Apollo, and pin the trailing edge to
+/// the live A–Z leading edge minus a small gap (fallback: mode
+/// reserve). Call from cellForRow, willDisplay, and after
+/// Open↔Closed. No-op on Phone. No native frame writes.
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
 
 /// Hide the native accessory only (safe from layoutSubviews). Does
