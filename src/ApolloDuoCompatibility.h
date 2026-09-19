@@ -15,7 +15,7 @@ extern "C" {
 //
 // Layout mode uses the same window bounds:
 //   Phone  — regular iPhone (not Duo): stock tab bar
-//   Closed — portrait-sized Duo window: right rail
+//   Closed — portrait-sized Duo window: stock tab bar, no rail
 //   Open   — wide landscape-sized Duo window: left rail
 // Dual-display (cover+inner) or a wide window is what marks Duo so
 // a normal phone portrait is not treated as Closed.

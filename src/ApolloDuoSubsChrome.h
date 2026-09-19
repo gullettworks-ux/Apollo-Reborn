@@ -2,8 +2,10 @@
 
 // Duo-only Subreddits nav chrome: centered title, Edit (top right),
 // floating + wired to Apollo's tappedAddBarButtonItem:. Completes the
-// existing rail / Liquid Glass title path — does not retile the list,
-// move stars, or pin the A–Z overlay.
+// existing rail / Liquid Glass title path — does not retile the list
+// or pin a new A–Z overlay. Duo stars are a table-sibling overlay
+// column; invoked from here so Closed Duo still resyncs it after
+// Open↔Closed without an active rail.
 
 __BEGIN_DECLS
 

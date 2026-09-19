@@ -1,4 +1,5 @@
 #import "ApolloDuoRail.h"
+#import "ApolloDuoRailLayout.h"
 #import "ApolloCommon.h"
 
 // Keep the rail attached to Apollo's tab controller across scene activate,
@@ -54,6 +55,10 @@
     if (ApolloDuoRailIsActive()) {
         ApolloDuoRailApplyListInsets((UIScrollView *)self);
         ApolloDuoRailPinSectionIndex((UITableView *)self);
+        ApolloDuoRailReanchorVisibleStarsAfterLayout((UITableView *)self);
+    } else if (ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) {
+        ApolloDuoRailPolishSubredditList((UITableView *)self);
+        ApolloDuoRailReanchorVisibleStarsAfterLayout((UITableView *)self);
     }
 }
 
@@ -70,6 +75,77 @@
     if (ApolloDuoRailIsActive()) {
         ApolloDuoRailApplyListInsets((UIScrollView *)self);
     }
+}
+
+%end
+
+%end
+
+%group ApolloDuoRailListRows
+
+%hook _TtC6Apollo23RedditListTableViewCell
+
+- (void)prepareForReuse {
+    ApolloDuoRailResetSubredditRowReuse((UITableViewCell *)self);
+    %orig;
+}
+
+- (void)layoutSubviews {
+    %orig;
+    ApolloDuoRailHideNativeStarInRow((UITableViewCell *)self);
+}
+
+%end
+
+%hook _TtC6Apollo24RedditListViewController
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    ApolloDuoRailReanchorRedditList((UIViewController *)self, NO);
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ApolloDuoRailReanchorRedditList((UIViewController *)self, YES);
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    %orig;
+    (void)size;
+    [coordinator animateAlongsideTransition:nil
+                                 completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        (void)context;
+        ApolloDuoRailReanchorRedditList((UIViewController *)self, YES);
+    }];
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    %orig;
+    if ([scrollView isKindOfClass:[UITableView class]]) {
+        ApolloDuoRailRefreshVisibleStars((UITableView *)scrollView);
+    }
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = %orig;
+    (void)tableView;
+    (void)indexPath;
+    if (cell && ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) {
+        ApolloDuoRailPrepareSubredditRow(cell);
+        ApolloDuoRailTightenSubredditRow(cell);
+        ApolloDuoRailRefreshVisibleStars(tableView);
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+    %orig;
+    (void)indexPath;
+    if (!cell || !ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) return;
+    ApolloDuoRailPrepareSubredditRow(cell);
+    ApolloDuoRailTightenSubredditRow(cell);
+    ApolloDuoRailRefreshVisibleStars(tableView);
 }
 
 %end
@@ -120,6 +196,9 @@
     %init(ApolloDuoRailTabs);
     if (objc_getClass("ASTableView")) {
         %init(ApolloDuoRailTexture);
+    }
+    if (objc_getClass("_TtC6Apollo24RedditListViewController")) {
+        %init(ApolloDuoRailListRows);
     }
     [[NSNotificationCenter defaultCenter] addObserverForName:UISceneDidActivateNotification
                                                       object:nil

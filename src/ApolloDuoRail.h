@@ -38,10 +38,41 @@ void ApolloDuoRailClearOpenContent(void);
 /// Favorite/sub rows get rail clearance only — no wide-row star cluster.
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 
-/// No-op. Per-cell readable / centerX / lead-delta thrash hung the Duo
-/// sim (25f8a7b) and still left the wrong layout. Releases any leftover
-/// constraint claim. Expanded Duo rows are a later patch.
+/// Duo-only: strip leftover per-cell custom stars and hide the
+/// native accessory. Overlay column is the star UI. Call from
+/// cellForRow / willDisplay.
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
+
+/// Hide native accessoryButton on Duo RedditList rows. Call from
+/// layoutSubviews so Apollo cannot re-show a mid-pane star.
+void ApolloDuoRailHideNativeStarInRow(UITableViewCell *cell);
+
+/// Sync the table-sibling overlay star column. forceLayout YES
+/// schedules one bounded deferred pass after Open chrome settles.
+void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout);
+
+/// Sync the overlay star column to visibleCells (appear / mode).
+void ApolloDuoRailReanchorVisibleStars(UITableView *tableView);
+
+/// Scroll-safe: sync the overlay star column to visibleCells.
+/// Does not write per-cell trailing constants or table margins.
+void ApolloDuoRailRefreshVisibleStars(UITableView *tableView);
+
+/// Coalesced next-turn overlay-column pass after table/VC layout.
+void ApolloDuoRailReanchorVisibleStarsAfterLayout(UITableView *tableView);
+
+/// Duo RedditList: sync the overlay star column.
+void ApolloDuoRailPolishSubredditList(UITableView *tableView);
+
+/// Strip leftover custom stars and hide (Duo) or restore (Phone)
+/// the native accessory. prepareForReuse does not pin a star.
+void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell);
+
+/// One-shot readable/center margin reset. Not for layoutSubviews.
+void ApolloDuoRailPrepareSubredditRow(UITableViewCell *cell);
+
+/// RedditList only: find its table and re-anchor. forceLayout as above.
+void ApolloDuoRailReanchorRedditList(UIViewController *controller, BOOL forceLayout);
 
 /// Open: 0 (stock A–Z). Closed has no rail, so this is also 0 at
 /// runtime (IsActive is NO).

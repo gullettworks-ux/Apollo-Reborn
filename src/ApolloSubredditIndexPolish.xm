@@ -1213,6 +1213,8 @@ static UIControl *ApolloSubredditIndexFindStarControlInView(UIView *view, UITabl
         UIView *candidate = stack.lastObject;
         [stack removeLastObject];
 
+        const char *candidateName = class_getName(candidate.class);
+        if (candidateName && strstr(candidateName, "DuoStarButton")) continue;
         if ([candidate isKindOfClass:[UIControl class]] && ![candidate isMemberOfClass:[ApolloSubredditStarHitProxy class]] && !candidate.hidden && candidate.alpha > 0.05) {
             CGRect frameInCell = CGRectZero;
             BOOL plausibleSize = ApolloSubredditIndexStarControlFrameIsPlausible((UIControl *)candidate, cell, &frameInCell);
@@ -1273,19 +1275,23 @@ static void ApolloSubredditIndexClearStarChrome(UIControl *control) {
 }
 
 static CGRect ApolloSubredditIndexProxyFrameForCell(UITableViewCell *cell, UIControl *nativeControl) {
-    CGFloat cellWidth = CGRectGetWidth(cell.bounds);
-    CGFloat cellHeight = CGRectGetHeight(cell.bounds);
-    CGFloat width = MIN(ApolloSubredditStarHitWidth, MAX(cellWidth, 0.0));
+    UIView *content = cell.contentView ?: cell;
+    CGFloat contentWidth = CGRectGetWidth(content.bounds);
+    CGFloat contentHeight = CGRectGetHeight(content.bounds);
+    if (contentWidth < 1.0) contentWidth = CGRectGetWidth(cell.bounds);
+    if (contentHeight < 1.0) contentHeight = CGRectGetHeight(cell.bounds);
+    CGFloat width = MIN(ApolloSubredditStarHitWidth, MAX(contentWidth, 0.0));
     CGFloat visibleWidth = MAX(width - MIN(ApolloSubredditStarHitTrailingInset, width), 0.0);
 
     if (!nativeControl) {
-        return CGRectMake(MAX(cellWidth - width, 0.0), 0.0, visibleWidth, cellHeight);
+        return CGRectMake(MAX(contentWidth - width, 0.0), 0.0, visibleWidth, contentHeight);
     }
 
-    CGRect nativeFrame = [cell convertRect:nativeControl.bounds fromView:nativeControl];
-    CGFloat minX = CGRectGetMidX(nativeFrame) - (width / 2.0);
-    minX = MIN(MAX(minX, 0.0), MAX(cellWidth - width, 0.0));
-    return CGRectMake(minX, 0.0, visibleWidth, cellHeight);
+    CGRect starFrame = [content convertRect:nativeControl.bounds fromView:nativeControl];
+    CGFloat minX = (CGFloat)ApolloDuoRailRowProxyMinX(CGRectGetMidX(starFrame),
+                                                     (double)width,
+                                                     (double)contentWidth);
+    return CGRectMake(minX, 0.0, visibleWidth, contentHeight);
 }
 
 static void ApolloSubredditIndexRemoveStarProxyFromCell(UITableViewCell *cell) {
@@ -1772,6 +1778,15 @@ static void ApolloSubredditIndexScheduleFavoritesRefresh(UITableView *tableView,
 static void ApolloSubredditIndexInstallStarProxyForCell(UITableViewCell *cell, UITableView *tableView) {
     if (!cell || !tableView) return;
 
+    // Duo paints stars in a table-sibling overlay column. Mid-pane
+    // hit proxies would steal taps from that column and keep the
+    // native accessory visible.
+    if (ApolloDuoRailStarColumnShouldApply(ApolloDuoCurrentMode())) {
+        ApolloSubredditIndexRemoveStarProxyFromCell(cell);
+        ApolloDuoRailHideNativeStarInRow(cell);
+        return;
+    }
+
     if (tableView.editing || cell.editing) {
         // In edit mode Apollo's reorder grip lives in the same right-side area.
         // Let the native reorder gesture win instead of covering it with our
@@ -1787,10 +1802,14 @@ static void ApolloSubredditIndexInstallStarProxyForCell(UITableViewCell *cell, U
         return;
     }
 
+    UIView *content = cell.contentView ?: cell;
     if (!proxy) {
         proxy = [[ApolloSubredditStarHitProxy alloc] initWithFrame:CGRectZero];
         objc_setAssociatedObject(cell, &kApolloSubredditStarProxyKey, proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [cell addSubview:proxy];
+        [content addSubview:proxy];
+    } else if (proxy.superview != content) {
+        [proxy removeFromSuperview];
+        [content addSubview:proxy];
     }
 
     proxy.tableView = tableView;
@@ -1799,7 +1818,7 @@ static void ApolloSubredditIndexInstallStarProxyForCell(UITableViewCell *cell, U
     proxy.subredditName = ApolloSubredditIndexCellTitle(cell);
     proxy.frame = ApolloSubredditIndexProxyFrameForCell(cell, nativeControl);
     ApolloSubredditIndexClearStarChrome(nativeControl);
-    [cell bringSubviewToFront:proxy];
+    [content bringSubviewToFront:proxy];
 
     if (![objc_getAssociatedObject(cell, &kApolloSubredditStarProxyLoggedKey) boolValue]) {
         objc_setAssociatedObject(cell, &kApolloSubredditStarProxyLoggedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -2393,7 +2412,11 @@ static void ApolloSubredditIndexStyleHeaderView(UIView *header, UITableView *tab
         }
         headerX = (CGFloat)ApolloDuoRailHeaderTitleMinX(windowX, (double)ApolloDuoRailRowStockLead);
     }
-    label.frame = CGRectMake(headerX, 0.0, MAX(CGRectGetWidth(header.bounds) - headerX - 54.0, 0.0), CGRectGetHeight(header.bounds));
+    CGFloat headerWidth = CGRectGetWidth(header.bounds);
+    int duoMode = ApolloDuoCurrentMode();
+    BOOL duoRows = ApolloDuoRailRowPolishShouldApply(duoMode);
+    CGFloat titleTrail = duoRows ? (CGFloat)ApolloDuoRailSectionLineTrailing : 54.0;
+    label.frame = CGRectMake(headerX, 0.0, MAX(headerWidth - headerX - titleTrail, 0.0), CGRectGetHeight(header.bounds));
 
     if (!separator) {
         separator = [[UIView alloc] initWithFrame:CGRectZero];
@@ -2408,7 +2431,13 @@ static void ApolloSubredditIndexStyleHeaderView(UIView *header, UITableView *tab
     CGFloat lineHeight = 2.0;
     CGSize labelSize = [text sizeWithAttributes:@{ NSFontAttributeName: label.font }];
     CGFloat lineX = CGRectGetMinX(label.frame) + ceil(labelSize.width) + 12.0;
-    CGFloat lineWidth = MAX(CGRectGetWidth(header.bounds) - lineX - 8.0, 0.0);
+    CGFloat lineTrailing = duoRows
+        ? (CGFloat)ApolloDuoRailSectionLineTrailing
+        : 8.0;
+    CGFloat lineMaxX = duoRows
+        ? (CGFloat)ApolloDuoRailSectionLineMaxX((double)headerWidth, (double)lineTrailing)
+        : (headerWidth - lineTrailing);
+    CGFloat lineWidth = MAX(lineMaxX - lineX, 0.0);
     CGFloat lineY = floor(CGRectGetMidY(header.bounds) - (lineHeight / 2.0));
     separator.frame = CGRectMake(lineX, lineY, lineWidth, lineHeight);
 

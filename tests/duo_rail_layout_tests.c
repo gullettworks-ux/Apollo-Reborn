@@ -114,15 +114,362 @@ int main(void) {
     Check(ApolloDuoRailClosedContentIsCrushed(280.0, 400.0),
           "reserving ~120pt on a 400pt Closed list is the 20–25% crush");
     Check(ApolloDuoRailClosedOverlayClearance() == 88.0,
-          "Closed visible trailing chrome is rail + A–Z");
-    Check(ApolloDuoRailClosedStarMaxX(400.0) == 312.0,
-          "Closed star sits at the visible row trailing edge");
-    Check(ApolloDuoRailClosedStarMinX(400.0, 28.0) == 284.0,
-          "Closed star origin is just left of A–Z");
-    Check(ApolloDuoRailClosedShouldNudgeStar(250.0, 312.0),
-          "a mid-column Closed star must be nudged to the row edge");
-    Check(!ApolloDuoRailClosedShouldNudgeStar(312.0, 312.0),
-          "an already-anchored Closed star is a no-op");
+          "Closed overlay-clearance math stays locked but is unused at runtime");
+    Check(ApolloDuoRailRowStarTrailing == 38,
+          "legacy 38pt constant stays locked and is not the runtime column");
+    Check(ApolloDuoRailRowStarMinTrailing == 8,
+          "live trailing floor is 8pt, not a fixed column X");
+    Check(ApolloDuoRailSectionLineTrailing == 8,
+          "section lines use an 8pt content-band gutter");
+    Check(ApolloDuoRailRowIndexStrip(1013.0, 997.0) == 16.0,
+          "live A–Z strip is cell.width minus content.maxX");
+    Check(ApolloDuoRailRowIndexStrip(1013.0, 1013.0) == 0.0,
+          "a full-bleed contentView has no index strip");
+    Check(ApolloDuoRailRowIndexStrip(400.0, 416.0) == 0.0,
+          "a contentView past the cell edge is not a negative strip");
+    Check(ApolloDuoRailRowStarMaxXLeftOfIndex(1013.0, 997.0, 8.0) == 997.0,
+          "star maxX sits immediately left of the live A–Z edge");
+    Check(ApolloDuoRailRowStarMaxXLeftOfIndex(997.0, 1100.0, 8.0) == 989.0,
+          "an A–Z edge outside contentView falls back to live trailing");
+    Check(ApolloDuoRailRowStarMaxXLeftOfIndex(1013.0, 0.0, 8.0) == 1005.0,
+          "a missing index uses content.maxX minus live trailing");
+    Check(ApolloDuoRailRowStarIsOutlier(250.0, 997.0),
+          "a mid-pane star is an outlier vs the A–Z column");
+    Check(!ApolloDuoRailRowStarIsOutlier(997.0, 997.0),
+          "a star on the live A–Z column is not an outlier");
+    Check(ApolloDuoRailRowShouldScheduleAfterLayoutPass(0),
+          "after table layout, one next-turn visible-cell pass may run");
+    Check(!ApolloDuoRailRowShouldScheduleAfterLayoutPass(1),
+          "after-layout re-anchor is coalesced (hang-safe)");
+    Check(ApolloDuoRailRowLiveStarTrailing(8.0, 16.0, 8.0) == 16.0,
+          "live trailing prefers the A–Z strip over the floor");
+    Check(ApolloDuoRailRowLiveStarTrailing(20.0, 0.0, 8.0) == 20.0,
+          "live layoutMargins.right win when contentView is already inset");
+    Check(ApolloDuoRailRowLiveStarTrailing(0.0, 0.0, 8.0) == 8.0,
+          "a zero live inset still keeps the 8pt floor");
+    Check(ApolloDuoRailRowLiveStarTrailing(8.0, 0.0, 8.0)
+              != ApolloDuoRailClosedOverlayClearance(),
+          "live trailing does not reserve the removed Closed overlay rail");
+    Check(ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeOpen)
+              == ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeClosed),
+          "Open and Closed share one contentView-relative floor");
+    Check(ApolloDuoRailRowStarTrailingForMode(ApolloDuoModePhone) == 0.0,
+          "regular iPhone does not apply the Duo star column");
+    Check(ApolloDuoRailRowStarMaxXInContent(400.0, 16.0) == 384.0,
+          "Closed contentView parks the star at content.maxX minus live trailing");
+    Check(ApolloDuoRailRowStarMaxXInContent(880.0, 16.0) == 864.0,
+          "Open contentView (after the left rail) uses the same trailing formula");
+    Check(ApolloDuoRailRowStarColumnMaxX(400.0, 38.0)
+              != 400.0 - ApolloDuoRailClosedOverlayClearance(),
+          "even the leftover 38pt math is not the 88pt overlay column");
+    Check(ApolloDuoRailClosedStarMaxX(400.0) == 392.0,
+          "ClosedStarMaxX aliases contentView maxX minus the 8pt floor");
+    Check(ApolloDuoRailClosedStarMinX(400.0, 28.0) == 364.0,
+          "ClosedStarMinX is that column minus star width");
+    Check(ApolloDuoRailRowShouldNudgeStar(250.0, 384.0),
+          "a mid-column first-paint star must be re-anchored after layout");
+    Check(!ApolloDuoRailRowShouldNudgeStar(384.0, 384.0),
+          "an already-anchored contentView star is a no-op");
+    Check(ApolloDuoRailRowShouldForceLayout(0),
+          "appear / mode / rotation may force table+cell layoutIfNeeded");
+    Check(!ApolloDuoRailRowShouldForceLayout(1),
+          "scroll must not force layoutIfNeeded (25f8a7b hang class)");
+    Check(ApolloDuoRailRowShouldBeginLayoutPass(0),
+          "a layout pass may start when none is running");
+    Check(!ApolloDuoRailRowShouldBeginLayoutPass(1),
+          "a nested layoutIfNeeded pass is refused");
+    Check(ApolloDuoRailRowShouldScheduleStarRetry(0, 0, 0),
+          "first paint with no star yet schedules a retry");
+    Check(ApolloDuoRailRowShouldScheduleStarRetry(0, 1, 1),
+          "a still-wrong star after the first pass retries");
+    Check(!ApolloDuoRailRowShouldScheduleStarRetry(0, 1, 0),
+          "a correctly anchored star does not retry");
+    Check(!ApolloDuoRailRowShouldScheduleStarRetry(3, 0, 1),
+          "retries stop at the bounded limit");
+    Check(ApolloDuoRailRowContentLooksStaleForOpen(744.0, 1133.0, 744.0),
+          "Closed-width content on an Open window is stale first-paint geometry");
+    Check(ApolloDuoRailRowContentLooksStaleForOpen(390.0, 1133.0, 744.0),
+          "a leftover phone column on an Open window is stale");
+    Check(!ApolloDuoRailRowContentLooksStaleForOpen(1013.0, 1133.0, 744.0),
+          "Open fill-width contentView is not stale");
+    Check(!ApolloDuoRailRowContentLooksStaleForOpen(744.0, 744.0, 1133.0),
+          "Closed portrait content matching the Closed window is not Open-stale");
+    Check(ApolloDuoRailRowContentViewLooksLetterboxed(744.0, 1013.0),
+          "Closed-width contentView inside an Open-wide cell is letterboxed");
+    Check(!ApolloDuoRailRowContentViewLooksLetterboxed(997.0, 1013.0),
+          "contentView inset only by the A–Z strip is not letterboxed");
+    Check(ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeOpen, 0.0, 0.0),
+          "Open mode with no window yet is unsettled");
+    Check(ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeOpen, 744.0, 1133.0),
+          "stored Open with a still-Closed window must wait");
+    Check(!ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeOpen, 1133.0, 744.0),
+          "Open mode with an Open window is settled");
+    Check(!ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeClosed, 0.0, 0.0),
+          "Closed does not wait on Open window bounds");
+    Check(ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeClosed, 744.0, 744.0,
+                                                 1133.0, 744.0),
+          "re-anchor before mode settles to Open must defer");
+    Check(ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeOpen, 744.0, 744.0,
+                                                 1133.0, 744.0),
+          "Open mode with Closed table/content width must defer");
+    Check(ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeOpen, 744.0, 1013.0,
+                                                 1133.0, 744.0),
+          "wide table with still-narrow contentView must defer");
+    Check(!ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeOpen, 1013.0, 1013.0,
+                                                  1133.0, 744.0),
+          "Open fill width is ready for the contentView re-anchor");
+    Check(!ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeClosed, 744.0, 744.0,
+                                                  744.0, 1133.0),
+          "Closed portrait uses its own width immediately");
+    Check(!ApolloDuoRailRowShouldAcceptCurrentContent(0, 1),
+          "first stale Open pass must not park on the Closed column");
+    Check(ApolloDuoRailRowShouldAcceptCurrentContent(3, 1),
+          "exhausted retries accept the current width (Closed/portrait settle)");
+    Check(ApolloDuoRailRowShouldAcceptCurrentContent(0, 0),
+          "final Open content is accepted immediately");
+    Check(!ApolloDuoRailRowShouldNudgeStarIfReady(250.0, 384.0, 1),
+          "do not nudge onto a stale Closed/narrow maxX");
+    Check(ApolloDuoRailRowShouldNudgeStarIfReady(250.0, 1005.0, 0),
+          "once Open width is live, a mid-pane star is nudged");
+    Check(ApolloDuoRailRowShouldScheduleStarRetryForGeometry(0, 1, 0, 1),
+          "on-target of a stale Closed column still retries");
+    Check(!ApolloDuoRailRowShouldScheduleStarRetryForGeometry(0, 1, 0, 0),
+          "on-target of final Open width does not retry");
+    Check(ApolloDuoRailRowShouldScheduleDeferredForce(0, 0, 1, 0),
+          "force-layout once is not enough; schedule one deferred Open pass");
+    Check(!ApolloDuoRailRowShouldScheduleDeferredForce(1, 0, 1, 1),
+          "a deferred pass already queued is not stacked (hang-safe)");
+    Check(ApolloDuoRailRowShouldScheduleDeferredForce(0, 1, 1, 1),
+          "still-stale Open geometry keeps deferring within the cap");
+    Check(!ApolloDuoRailRowShouldScheduleDeferredForce(0, 3, 1, 1),
+          "deferred Open re-anchor stops at the bounded limit");
+    Check(!ApolloDuoRailRowShouldScheduleDeferredForce(0, 1, 1, 0),
+          "a settled Open pass does not keep force-layouting");
+    Check(ApolloDuoRailRowShouldClearCachedColumn(1, ApolloDuoModeClosed, ApolloDuoModeOpen),
+          "Closed→Open drops the cached Closed column");
+    Check(ApolloDuoRailRowShouldClearCachedColumn(1, ApolloDuoModeOpen, ApolloDuoModeClosed),
+          "Open→Closed drops the cached Open column");
+    Check(!ApolloDuoRailRowShouldClearCachedColumn(0, ApolloDuoModeClosed, ApolloDuoModeOpen),
+          "first paint has no cached column to clear");
+    Check(!ApolloDuoRailRowShouldClearCachedColumn(1, ApolloDuoModeOpen, ApolloDuoModeOpen),
+          "same-mode re-anchor keeps the live column");
+    Check(ApolloDuoRailRowShouldRevisitMargins(744.0, 1013.0, ApolloDuoModeClosed,
+                                              ApolloDuoModeOpen),
+          "content that grew from Closed to Open must revisit margins");
+    Check(ApolloDuoRailRowShouldRevisitMargins(1013.0, 744.0, ApolloDuoModeOpen,
+                                              ApolloDuoModeClosed),
+          "Open→Closed revisits margins even when width shrinks");
+    Check(!ApolloDuoRailRowShouldRevisitMargins(1013.0, 1013.0, ApolloDuoModeOpen,
+                                               ApolloDuoModeOpen),
+          "stable Open width does not revisit margins");
+    Check(ApolloDuoRailRowMarginsNeedReset(744.0, 1013.0, 16.0, 16.0),
+          "letterboxed Open contentView resets even with stock leading");
+    Check(!ApolloDuoRailRowMarginsNeedReset(400.0, 400.0, 16.0, 16.0),
+          "Closed/portrait stock margins stay put");
+    Check(ApolloDuoRailRowStarSearchMinX(880.0) == 48.0,
+          "wide first-paint search still finds a mid-pane star");
+    Check(ApolloDuoRailRowStarSearchMinX(200.0) == 30.0,
+          "narrow content uses 15% rather than a 40% miss");
+    Check(ApolloDuoRailRowMarginsLookCentered(920.0, 124.0, 16.0),
+          "readable-centered leftover margins must be reset on reuse");
+    Check(!ApolloDuoRailRowMarginsLookCentered(400.0, 16.0, 16.0),
+          "stock portrait margins are not a leftover landscape column");
+    Check(ApolloDuoRailRowProxyMinX(384.0, 60.0, 400.0) == 340.0,
+          "hit proxy centers on the native star and clamps to contentView");
+    Check(ApolloDuoRailRowProxyMinX(20.0, 60.0, 400.0) == 0.0,
+          "proxy origin clamps to contentView");
+    Check(ApolloDuoRailRowTitleMaxWidth(16.0, 334.0, 12.0) == 306.0,
+          "title may use the band up to the star column");
+    Check(ApolloDuoRailRowShouldShrinkTitle(800.0, 306.0),
+          "a stretchy wide title must shrink before the star");
+    Check(!ApolloDuoRailRowShouldShrinkTitle(300.0, 306.0),
+          "a title that already clears the star is a no-op");
+    Check(ApolloDuoRailSectionLineMaxX(400.0, 8.0) == 392.0,
+          "Closed section lines span the content band");
+    Check(ApolloDuoRailSectionLineMaxX(920.0, 8.0) == 912.0,
+          "Open section lines span the wide content band");
+    Check(ApolloDuoRailRowPolishShouldApply(ApolloDuoModeOpen)
+              && ApolloDuoRailRowPolishShouldApply(ApolloDuoModeClosed),
+          "row polish runs on Open and Closed Duo");
+    Check(!ApolloDuoRailRowPolishShouldApply(ApolloDuoModePhone),
+          "row polish does not run on regular iPhone");
+    Check(!ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeOpen)
+              && !ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeClosed)
+              && !ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModePhone),
+          "per-cell custom stars are abandoned on every mode");
+    Check(ApolloDuoRailStarColumnShouldApply(ApolloDuoModeOpen)
+              && ApolloDuoRailStarColumnShouldApply(ApolloDuoModeClosed),
+          "Duo Open and Closed install the overlay star column");
+    Check(!ApolloDuoRailStarColumnShouldApply(ApolloDuoModePhone),
+          "regular iPhone keeps Apollo's native star; no overlay column");
+    Check(ApolloDuoRailStarColumnGuideLeading(400.0, 420.0) == 400.0,
+          "overlay guide is the leftmost of A–Z and a trailing pill");
+    Check(ApolloDuoRailStarColumnGuideLeading(400.0, 0.0) == 400.0,
+          "overlay guide is the live A–Z leading when no pill overlaps");
+    Check(ApolloDuoRailStarColumnGuideLeading(0.0, 420.0) == 420.0,
+          "overlay guide is the trailing-half pill when the index is missing");
+    Check(ApolloDuoRailStarColumnGuideLeading(0.0, 0.0) == 0.0,
+          "no A–Z and no pill means use the width fallback");
+    Check(ApolloDuoRailStarColumnMaxXFromGuide(400.0, 8.0) == 392.0,
+          "overlay button.maxX is A–Z leading minus the gap");
+    Check(ApolloDuoRailStarColumnMaxXFromGuide(0.0, 8.0) == 0.0,
+          "a missing guide does not invent a column X");
+    Check(ApolloDuoRailStarColumnFallbackMaxX(1013.0, 16.0, 8.0) == 989.0,
+          "first-paint fallback is table.width − index − gap");
+    Check(ApolloDuoRailStarColumnFallbackMaxX(400.0, 16.0, 8.0) == 376.0,
+          "Closed first-paint fallback sits left of a 16pt A–Z");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(400.0, 1013.0, 16.0, 8.0) == 392.0,
+          "a live A–Z guide wins over the width fallback");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(0.0, 1013.0, 16.0, 8.0) == 989.0,
+          "missing index uses the first-paint fallback");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(997.0, 1013.0, 16.0, 8.0) == 989.0,
+          "overlay maxX is immediately left of a trailing A–Z");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(933.0, 1013.0, 16.0, 8.0) == 925.0,
+          "a trailing-half nav pill pulls the column inland of A–Z");
+    Check(ApolloDuoRailStarColumnHostMinX(392.0, 44.0) == 348.0,
+          "host minX parks a 44pt hit target so button.maxX hits the guide");
+    Check(ApolloDuoRailStarColumnHostMinX(925.0, 44.0) == 881.0,
+          "host minX for a pill-cleared column stays on the trailing half");
+    Check(ApolloDuoRailStarColumnHostMinX(20.0, 44.0) == 0.0,
+          "a too-narrow band clamps the host to 0, not a negative X");
+    Check(ApolloDuoRailStarColumnNeedsMove(348.0, 400.0),
+          "a mid-pane leftover host must move to the overlay column");
+    Check(!ApolloDuoRailStarColumnNeedsMove(348.0, 348.0),
+          "an already-parked overlay host is a no-op");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(997.0, 1013.0, 16.0, 8.0)
+              < 997.0,
+          "overlay stars stay left of the A–Z leading edge");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(933.0, 1013.0, 16.0, 8.0)
+              < 933.0,
+          "overlay stars stay left of a floating right nav pill");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(997.0, 1013.0, 16.0, 8.0)
+              > 1013.0 * 0.5,
+          "overlay column is not a mid-pane X");
+    Check(ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModeOpen)
+              && ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModeClosed),
+          "leftover table-reserve gate still matches Duo modes");
+    Check(!ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModePhone),
+          "leftover table-reserve gate stays off on regular iPhone");
+    Check(ApolloDuoRailTableIndexReserve(16.0, 0.0, 8.0, 38.0) == 38.0,
+          "a 16pt A–Z strip still uses the 38pt polish floor");
+    Check(ApolloDuoRailTableIndexReserve(56.0, 0.0, 8.0, 38.0) == 64.0,
+          "a wider A–Z overlay is width + gap");
+    Check(ApolloDuoRailTableIndexReserve(16.0, 56.0, 8.0, 38.0) == 64.0,
+          "index reserve prefers the wider overlay");
+    Check(ApolloDuoRailTableIndexReserve(0.0, 0.0, 8.0, 38.0) == 0.0,
+          "no index strip does not invent a trailing column");
+    Check(ApolloDuoRailTablePillOverlap(1013.0, 940.0, 73.0) == 73.0,
+          "a trailing-half pill overlapping the list is reserved");
+    Check(ApolloDuoRailTablePillOverlap(1013.0, 0.0, 112.0) == 0.0,
+          "the leading Open rail is not a trailing pill");
+    Check(ApolloDuoRailTablePillOverlap(1013.0, 1013.0, 80.0) == 0.0,
+          "a pill already past table.maxX does not add reserve");
+    Check(ApolloDuoRailTablePillOverlap(400.0, 100.0, 80.0) == 0.0,
+          "a leading-half pill is ignored");
+    Check(ApolloDuoRailTableTrailingReserve(38.0, 0.0) == 38.0,
+          "A–Z reserve wins when no pill overlaps");
+    Check(ApolloDuoRailTableTrailingReserve(38.0, 80.0) == 80.0,
+          "an overlapping pill is the tighter (larger) reserve");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModePhone, 38.0, 80.0) == 0.0,
+          "Phone never applies the table reserve");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModeClosed, 38.0, 0.0) == 38.0,
+          "Closed reserve is A–Z only when no pill overlaps");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModeOpen, 38.0, 56.0) == 56.0,
+          "Open adds a measured trailing-pill overlap");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModeClosed, 38.0, 0.0)
+              != ApolloDuoRailClosedOverlayClearance(),
+          "table reserve is not the removed Closed overlay column");
+    Check(ApolloDuoRailTableBandMaxX(1013.0, 38.0) == 975.0,
+          "content + native accessory end immediately left of the reserve");
+    Check(ApolloDuoRailNativeStarNeedsOverlay(1010.0, 975.0),
+          "leftover detector: a mid-pane native star sat past the reserved band");
+    Check(!ApolloDuoRailNativeStarNeedsOverlay(975.0, 975.0),
+          "leftover detector: a native star on the reserved band looked parked");
+    Check(ApolloDuoRailTableReserveNeedsUpdate(8.0, 38.0),
+          "raising a collapsed 8pt floor to the A–Z reserve is a write");
+    Check(!ApolloDuoRailTableReserveNeedsUpdate(38.0, 38.0),
+          "an already-applied table reserve is a no-op");
+    Check(ApolloDuoRailTableIndexFloor == 38,
+          "table index floor matches the Subreddit polish A–Z clear");
+    Check(ApolloDuoRailRowShouldClaimStarButton(0),
+          "first configure installs the custom star");
+    Check(ApolloDuoRailRowShouldClaimStarButton(1),
+          "already-displayed cells still reinstall (no stale trailing)");
+    Check(ApolloDuoRailRowShouldReinstallStar(0) && ApolloDuoRailRowShouldReinstallStar(1),
+          "configure / willDisplay / open-close always reinstall the star");
+    Check(ApolloDuoRailRowShouldClearStarOnReuse(1)
+              && ApolloDuoRailRowShouldClearStarOnReuse(0),
+          "prepareForReuse always drops the prior subreddit binding");
+    Check(ApolloDuoRailRowStarBindingIsStale(0, 1, 1),
+          "a missing name is a stale star association");
+    Check(ApolloDuoRailRowStarBindingIsStale(1, 0, 1),
+          "a reused cell's prior subreddit name is stale");
+    Check(ApolloDuoRailRowStarBindingIsStale(1, 1, 0),
+          "a detached star button is a stale association");
+    Check(!ApolloDuoRailRowStarBindingIsStale(1, 1, 1),
+          "the current subreddit with a live button is not stale");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 940.0) == 60.0,
+          "a trailing-half minX still converts to an inset");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 80.0) == 0.0,
+          "the leading Open rail is not a trailing inset");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 1000.0) == 0.0,
+          "a guide at content.maxX is not a trailingInsetFromMinX inset");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(400.0, 0.0) == 0.0,
+          "a missing chrome minX is not an inset");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0) == 24.0,
+          "full-bleed content pins star maxX to index leading minus gap");
+    Check(1013.0 - ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0)
+              == 997.0 - 8.0,
+          "star maxX is the live A–Z leading edge minus the gap");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(997.0, 997.0, 16.0, 8.0) == 24.0,
+          "already-inset contentView still reserves index width + gap");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(997.0, 1100.0, 16.0, 8.0) == 24.0,
+          "an index past content.maxX still reserves index width + gap");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0)
+              > (double)ApolloDuoRailRowStarMinTrailing,
+          "Open trailing never collapses to the 8pt floor when an index strip exists");
+    Check(ApolloDuoRailRowStarTrailingFromGuide(1013.0, 997.0, 16.0, 8.0)
+              >= 16.0 + 8.0,
+          "trailing is at least the index-leading clear (width + gap)");
+    Check(ApolloDuoRailRowStarTrailingCollapsesToFloor(8.0, 8.0, 16.0),
+          "8pt trailing with a live index strip is the reuse bug");
+    Check(!ApolloDuoRailRowStarTrailingCollapsesToFloor(24.0, 8.0, 16.0),
+          "index-pinned trailing is not the floor");
+    Check(!ApolloDuoRailRowStarTrailingCollapsesToFloor(8.0, 8.0, 0.0),
+          "the floor is allowed only when no index strip exists");
+    Check(ApolloDuoRailRowStarClearLeading(997.0, 940.0) == 940.0,
+          "a trailing rail inland of A–Z is the tighter guide");
+    Check(ApolloDuoRailRowStarClearLeading(997.0, 0.0) == 997.0,
+          "A–Z leading is the guide when the rail is leading-side");
+    Check(ApolloDuoRailRowStarClearLeading(0.0, 0.0) == 0.0,
+          "no live guide leaves leading at 0 for the mode reserve");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeClosed, 16.0, 8.0, 56.0) == 24.0,
+          "Closed reserve is A–Z + gap only (stock tabs, no crushing rail)");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeOpen, 16.0, 8.0, 0.0) == 24.0,
+          "Open without a trailing rail is A–Z + gap");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeOpen, 16.0, 8.0, 56.0) == 80.0,
+          "Open adds a measured trailing-rail clear only when that rail exists");
+    Check(ApolloDuoRailRowStarModeReserve(ApolloDuoModeOpen, 16.0, 8.0, 56.0)
+              != ApolloDuoRailClosedOverlayClearance(),
+          "mode reserve is not the removed Closed overlay reservation");
+    Check(ApolloDuoRailRowIndexConstraintInset(16.0, 0.0) == 16.0,
+          "full-bleed contentView keeps the live A–Z inset");
+    Check(ApolloDuoRailRowIndexConstraintInset(16.0, 16.0) == 16.0,
+          "already-inset contentView must not zero the A–Z inset");
+    Check(ApolloDuoRailRowShouldUpdateStarTrailing(-8.0, -24.0),
+          "trailing constant updates when the live index leading changes");
+    Check(!ApolloDuoRailRowShouldUpdateStarTrailing(-24.0, -24.0),
+          "unchanged index-leading trailing is a no-op");
+    Check(ApolloDuoRailRowStarShouldShowFilled(1, 0),
+          "a name in FavoriteSubreddits shows a filled star");
+    Check(ApolloDuoRailRowStarShouldShowFilled(0, 1),
+          "a Favorites-section row shows a filled star");
+    Check(!ApolloDuoRailRowStarShouldShowFilled(0, 0),
+          "an unfavorited A–Z row shows an outline star");
+    Check(ApolloDuoRailRowStarButtonTrailing() == (double)ApolloDuoRailRowStarIndexGap,
+          "custom star gap is 8pt left of the live A–Z leading edge");
+    Check(ApolloDuoRailRowStarButtonSize == 28 && ApolloDuoRailRowStarButtonHit == 44,
+          "custom star glyph is 28pt inside a 44pt hit target");
     Check(ApolloDuoCoverPillWidth == 80 && ApolloDuoCoverPillBottom == 120,
           "cover pill clearance is 80 trailing x 120 bottom");
     Check(ApolloDuoCoverChromeShouldApply(0, 1),
@@ -235,7 +582,10 @@ int main(void) {
     Check(ApolloDuoRailRowLeadDelta(18.0, 98.0) != 18.0 + ApolloDuoRailRowTrailingExtra(920.0),
           "trailing-extra must not be applied as a leading indent");
     Check(ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0) == 166.0,
-          "star sits after the drawn text, not at RowMaxContentWidth");
+          "legacy after-text cluster stays locked and unused at runtime");
+    Check(ApolloDuoRailRowStarColumnMaxX(920.0, 38.0)
+              != ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0),
+          "runtime far-right column is not the after-text cluster");
     Check(ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0) > 98.0 + 40.0 - 0.5,
           "star is not on the first letter");
     Check(ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0) < (double)ApolloDuoRailRowMaxContentWidth,

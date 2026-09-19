@@ -32,6 +32,25 @@ enum {
        FAVORITES titles mid-pane. Portrait (stock RedditList) is the look. */
     ApolloDuoRailRowMaxContentWidth = 480,
     ApolloDuoRailRowStarGap = 28,
+    /* Legacy fixed 38pt column — leftover. Runtime stars are a
+       table-sibling overlay column (StarColumn*), not a per-cell X
+       and not a table layoutMargins reserve. 8 is only a leftover floor. */
+    ApolloDuoRailRowStarTrailing = 38,
+    ApolloDuoRailRowStarMinTrailing = 8,
+    ApolloDuoRailSectionLineTrailing = 8,
+    ApolloDuoRailRowTitleStarGap = 12,
+    ApolloDuoRailRowStarRetryLimit = 3,
+    ApolloDuoRailRowStarSearchFloor = 48,
+    /* Leftover custom-star metrics. Do NOT install ApolloDuoStarButton
+       or pin contentView.trailing. Kept so host tests cannot silently
+       revive the per-cell path. */
+    ApolloDuoRailRowStarButtonSize = 28,
+    ApolloDuoRailRowStarButtonHit = 44,
+    ApolloDuoRailRowStarIndexGap = 8,
+    /* Leftover table-level trailing reserve. Runtime does not write
+       layoutMargins — that never moved accessoryButton and clipped
+       Favorites titles. Overlay column X is StarColumn* below. */
+    ApolloDuoRailTableIndexFloor = 38,
     ApolloDuoCoverPillWidth = 80,   /* cover system pill; Compact only */
     ApolloDuoCoverPillBottom = 120, /* lift FABs above the cover gear */
     /* Subs nav chrome (title / Edit / floating +). Insets only the
@@ -186,28 +205,575 @@ static inline double ApolloDuoRailSectionIndexTrailing(void) {
     return ApolloDuoRailSectionIndexTrailingForMode(ApolloDuoModeOpen);
 }
 
-// Visible trailing chrome on a full-bleed Closed row: overlay rail +
-// the A–Z that sits beside it. Stars / header lines stop here.
+// Leftover Closed overlay math (rail + A–Z). Not applied to stars or
+// section lines — Closed has no side rail. Host tests lock the number
+// so we cannot silently reuse it as a trailing inset.
 static inline double ApolloDuoRailClosedOverlayClearance(void) {
     return (double)ApolloDuoRailWidthClosed + (double)ApolloDuoRailClosedIndexWidth;
 }
 
-static inline double ApolloDuoRailClosedStarMaxX(double cellWidth) {
+// Leftover helper: max(margins.right, A–Z strip, floor). Runtime
+// stars pin to the live index leading edge
+// (ApolloDuoRailRowStarTrailingFromGuide), not this mix. Host tests
+// still lock it so a margins-only path cannot sneak back.
+static inline double ApolloDuoRailRowLiveStarTrailing(double marginRight,
+                                                      double indexStrip,
+                                                      double minTrailing) {
+    if (marginRight < 0.0) marginRight = 0.0;
+    if (indexStrip < 0.0) indexStrip = 0.0;
+    if (minTrailing < 0.0) minTrailing = 0.0;
+    double trailing = marginRight;
+    if (indexStrip > trailing) trailing = indexStrip;
+    if (minTrailing > trailing) trailing = minTrailing;
+    return trailing;
+}
+
+// Live A–Z strip from cell vs contentView frames. A real index width
+// (~16pt) is the trailing edge — do not zero it.
+static inline double ApolloDuoRailRowIndexStrip(double cellWidth, double contentMaxX) {
+    double strip = cellWidth - contentMaxX;
+    return strip > 0.0 ? strip : 0.0;
+}
+
+// After UITableView layoutSubviews: one coalesced next-turn walk of
+// every visible cell. No layoutIfNeeded (scroll/layout hang class).
+static inline int ApolloDuoRailRowShouldScheduleAfterLayoutPass(int alreadyScheduled) {
+    return alreadyScheduled ? 0 : 1;
+}
+
+// Open and Closed share one contentView-relative formula. Phone is 0
+// so callers can skip. The leftover 38pt constant is not the column.
+static inline double ApolloDuoRailRowStarTrailingForMode(int mode) {
+    if (mode != ApolloDuoModeOpen && mode != ApolloDuoModeClosed) return 0.0;
+    return (double)ApolloDuoRailRowStarMinTrailing;
+}
+
+// Far-right star column. Same cell-local maxX on every starred row
+// (Favorites and A–Z). Does not key off title width and does not
+// reserve the removed Closed overlay rail.
+static inline double ApolloDuoRailRowStarColumnMaxX(double cellWidth,
+                                                    double trailing) {
     if (cellWidth <= 0.0) return 0.0;
-    double maxX = cellWidth - ApolloDuoRailClosedOverlayClearance();
+    if (trailing < 0.0) trailing = 0.0;
+    double maxX = cellWidth - trailing;
     return maxX > 0.0 ? maxX : 0.0;
 }
 
-static inline double ApolloDuoRailClosedStarMinX(double cellWidth, double starWidth) {
+static inline double ApolloDuoRailRowStarColumnMinX(double cellWidth,
+                                                    double starWidth,
+                                                    double trailing) {
     if (starWidth < 0.0) starWidth = 0.0;
-    double minX = ApolloDuoRailClosedStarMaxX(cellWidth) - starWidth;
+    double minX = ApolloDuoRailRowStarColumnMaxX(cellWidth, trailing) - starWidth;
     return minX > 0.0 ? minX : 0.0;
 }
 
-static inline int ApolloDuoRailClosedShouldNudgeStar(double starMaxX, double wantMaxX) {
-    double gap = wantMaxX - starMaxX;
+static inline int ApolloDuoRailRowShouldNudgeStar(double haveMaxX, double wantMaxX) {
+    double gap = wantMaxX - haveMaxX;
     if (gap < 0.0) gap = -gap;
     return gap > 0.5;
+}
+
+// Star maxX immediately left of the live A–Z edge when that edge is
+// in/at this contentView. Otherwise content.maxX minus liveTrailing.
+static inline double ApolloDuoRailRowStarMaxXLeftOfIndex(double contentWidth,
+                                                         double indexMinXInContent,
+                                                         double liveTrailing) {
+    if (indexMinXInContent > 0.5 && indexMinXInContent <= contentWidth + 0.5) {
+        return indexMinXInContent;
+    }
+    return ApolloDuoRailRowStarColumnMaxX(contentWidth, liveTrailing);
+}
+
+static inline int ApolloDuoRailRowStarIsOutlier(double haveMaxX, double wantMaxX) {
+    return ApolloDuoRailRowShouldNudgeStar(haveMaxX, wantMaxX);
+}
+
+// Width-only clamp so a stretchy title cannot run under the star
+// column. Origin stays put (left-aligned).
+static inline double ApolloDuoRailRowTitleMaxWidth(double titleMinX,
+                                                   double starMinX,
+                                                   double gap) {
+    if (gap < 0.0) gap = 0.0;
+    double width = starMinX - gap - titleMinX;
+    return width > 0.0 ? width : 0.0;
+}
+
+static inline int ApolloDuoRailRowShouldShrinkTitle(double haveWidth, double wantWidth) {
+    return haveWidth > wantWidth + 0.5;
+}
+
+// Section divider (FAVORITES / MODERATOR / A) ends at the content
+// trailing gutter — full-width of the usable band, not a readable
+// column and not 88pt inland of a removed overlay rail.
+static inline double ApolloDuoRailSectionLineMaxX(double headerWidth,
+                                                  double trailing) {
+    return ApolloDuoRailRowStarColumnMaxX(headerWidth, trailing);
+}
+
+static inline int ApolloDuoRailRowPolishShouldApply(int mode) {
+    return mode == ApolloDuoModeOpen || mode == ApolloDuoModeClosed;
+}
+
+// Abandoned. Per-cell ApolloDuoStarButton trailing collapsed on
+// reuse / Open↔Closed. Table layoutMargins also failed to move
+// accessoryButton (Favorites “Apple” stayed mid-pane). Runtime is
+// a table-sibling overlay column. Never install in-cell stars.
+static inline int ApolloDuoRailRowShouldInstallCustomStar(int mode) {
+    (void)mode;
+    return 0;
+}
+
+// Duo RedditList overlay column. Phone keeps Apollo's native star.
+static inline int ApolloDuoRailStarColumnShouldApply(int mode) {
+    return ApolloDuoRailRowPolishShouldApply(mode);
+}
+
+// Leftmost trailing guide: live A–Z leading, or a trailing-half
+// floating pill that sits inland of the index.
+static inline double ApolloDuoRailStarColumnGuideLeading(double indexLeading,
+                                                        double pillLeading) {
+    int haveIndex = indexLeading > 0.5;
+    int havePill = pillLeading > 0.5;
+    if (haveIndex && havePill) {
+        return indexLeading < pillLeading ? indexLeading : pillLeading;
+    }
+    if (haveIndex) return indexLeading;
+    if (havePill) return pillLeading;
+    return 0.0;
+}
+
+// Overlay button.maxX in table space: guide − gap. 0 means “use
+// the width fallback” (index not laid out yet).
+static inline double ApolloDuoRailStarColumnMaxXFromGuide(double guideLeading,
+                                                         double gap) {
+    if (gap < 0.0) gap = 0.0;
+    if (guideLeading <= 0.5) return 0.0;
+    double maxX = guideLeading - gap;
+    return maxX > 0.0 ? maxX : 0.0;
+}
+
+// First-paint / missing-index fallback: table.maxX − index width − gap.
+static inline double ApolloDuoRailStarColumnFallbackMaxX(double tableWidth,
+                                                        double indexWidth,
+                                                        double gap) {
+    if (tableWidth <= 0.0) return 0.0;
+    if (indexWidth < 0.0) indexWidth = 0.0;
+    if (gap < 0.0) gap = 0.0;
+    double maxX = tableWidth - indexWidth - gap;
+    return maxX > 0.0 ? maxX : 0.0;
+}
+
+static inline double ApolloDuoRailStarColumnResolvedMaxX(double guideLeading,
+                                                        double tableWidth,
+                                                        double indexWidth,
+                                                        double gap) {
+    double fromGuide = ApolloDuoRailStarColumnMaxXFromGuide(guideLeading, gap);
+    if (fromGuide > 0.5) return fromGuide;
+    return ApolloDuoRailStarColumnFallbackMaxX(tableWidth, indexWidth, gap);
+}
+
+// Host strip origin so button.maxX == columnMaxX.
+static inline double ApolloDuoRailStarColumnHostMinX(double columnMaxX,
+                                                    double hostWidth) {
+    if (hostWidth < 0.0) hostWidth = 0.0;
+    double minX = columnMaxX - hostWidth;
+    return minX > 0.0 ? minX : 0.0;
+}
+
+static inline int ApolloDuoRailStarColumnNeedsMove(double haveX, double wantX) {
+    double gap = haveX - wantX;
+    if (gap < 0.0) gap = -gap;
+    return gap > 0.5;
+}
+
+// Leftover table-margin gate. Runtime uses StarColumnShouldApply.
+static inline int ApolloDuoRailTableShouldReserveTrailing(int mode) {
+    return ApolloDuoRailRowPolishShouldApply(mode);
+}
+
+// A–Z reserve: max(live index, overlay) + gap, but never below the
+// 38pt polish floor while an index strip exists. No index → 0 (do
+// not invent a column).
+static inline double ApolloDuoRailTableIndexReserve(double indexWidth,
+                                                   double overlayWidth,
+                                                   double gap,
+                                                   double floor) {
+    double width = indexWidth > overlayWidth ? indexWidth : overlayWidth;
+    if (width < 0.0) width = 0.0;
+    if (gap < 0.0) gap = 0.0;
+    if (floor < 0.0) floor = 0.0;
+    if (width <= 0.5) return 0.0;
+    double reserve = width + gap;
+    return reserve > floor ? reserve : floor;
+}
+
+// Trailing-half chrome only. A leading Open sidebar is 0. A pill
+// sitting at/past table.maxX is 0 (already clear).
+static inline double ApolloDuoRailTablePillOverlap(double tableWidth,
+                                                  double pillMinXInTable,
+                                                  double pillWidth) {
+    if (tableWidth <= 0.0 || pillWidth <= 0.5) return 0.0;
+    if (pillMinXInTable >= tableWidth - 0.5) return 0.0;
+    double pillMaxX = pillMinXInTable + pillWidth;
+    if (pillMaxX <= tableWidth * 0.5) return 0.0;
+    double lead = pillMinXInTable;
+    if (lead < tableWidth * 0.5) lead = tableWidth * 0.5;
+    double overlap = tableWidth - lead;
+    return overlap > 0.0 ? overlap : 0.0;
+}
+
+// One number for table.layoutMargins.right / directional trailing.
+// Tighter (larger) of A–Z reserve and measured pill overlap.
+static inline double ApolloDuoRailTableTrailingReserve(double indexReserve,
+                                                      double pillOverlap) {
+    if (indexReserve < 0.0) indexReserve = 0.0;
+    if (pillOverlap < 0.0) pillOverlap = 0.0;
+    return indexReserve > pillOverlap ? indexReserve : pillOverlap;
+}
+
+static inline double ApolloDuoRailTableModeReserve(int mode,
+                                                  double indexReserve,
+                                                  double pillOverlap) {
+    if (!ApolloDuoRailTableShouldReserveTrailing(mode)) return 0.0;
+    return ApolloDuoRailTableTrailingReserve(indexReserve, pillOverlap);
+}
+
+static inline double ApolloDuoRailTableBandMaxX(double tableWidth, double reserve) {
+    if (tableWidth <= 0.0) return 0.0;
+    if (reserve < 0.0) reserve = 0.0;
+    double maxX = tableWidth - reserve;
+    return maxX > 0.0 ? maxX : 0.0;
+}
+
+static inline int ApolloDuoRailTableReserveNeedsUpdate(double have, double want) {
+    double gap = have - want;
+    if (gap < 0.0) gap = -gap;
+    return gap > 0.5;
+}
+
+// Leftover margin-failure detector. Runtime always installs the
+// overlay column on Duo — layoutMargins never moved accessoryButton.
+static inline int ApolloDuoRailNativeStarNeedsOverlay(double starMaxX,
+                                                     double bandMaxX) {
+    if (bandMaxX <= 0.5) return 0;
+    return starMaxX > bandMaxX + 0.5;
+}
+
+// Leftover custom-star install flags. Runtime never installs
+// ApolloDuoStarButton; host tests lock these so a reinstall path
+// cannot sneak back as the Duo star policy.
+static inline int ApolloDuoRailRowShouldReinstallStar(int alreadyInstalled) {
+    (void)alreadyInstalled;
+    return 1;
+}
+
+static inline int ApolloDuoRailRowShouldClaimStarButton(int alreadyClaimed) {
+    return ApolloDuoRailRowShouldReinstallStar(alreadyClaimed);
+}
+
+static inline int ApolloDuoRailRowShouldClearStarOnReuse(int hasCustomStar) {
+    (void)hasCustomStar;
+    return 1;
+}
+
+// Prior cell's name / missing superview / missing name = stale.
+// Never keep a reused row's frame or Favorite binding.
+static inline int ApolloDuoRailRowStarBindingIsStale(int hasName,
+                                                     int namesMatch,
+                                                     int hasSuperview) {
+    if (!hasName || !namesMatch || !hasSuperview) return 1;
+    return 0;
+}
+
+static inline int ApolloDuoRailRowStarShouldShowFilled(int inFavoritesList,
+                                                      int inFavoritesSection) {
+    return (inFavoritesList || inFavoritesSection) ? 1 : 0;
+}
+
+static inline double ApolloDuoRailRowStarButtonTrailing(void) {
+    return (double)ApolloDuoRailRowStarIndexGap;
+}
+
+// Leftover: view minX → trailing inset. Runtime stars no longer use
+// this as the column (it returned 0 when the index sat at/past
+// content.maxX). Host tests keep the leading-half filter.
+static inline double ApolloDuoRailRowTrailingInsetFromMinX(double contentWidth,
+                                                           double minXInContent) {
+    if (contentWidth <= 0.0) return 0.0;
+    if (minXInContent <= contentWidth * 0.5) return 0.0;
+    if (minXInContent >= contentWidth) return 0.0;
+    return contentWidth - minXInContent;
+}
+
+// Leftover max(index, chrome, floor). Do not use for custom stars —
+// that path collapsed to the 8pt floor when chrome was missed.
+static inline double ApolloDuoRailRowStarConstraintTrailing(double indexInset,
+                                                            double chromeInset,
+                                                            double minTrailing) {
+    if (indexInset < 0.0) indexInset = 0.0;
+    if (chromeInset < 0.0) chromeInset = 0.0;
+    if (minTrailing < 0.0) minTrailing = 0.0;
+    double trailing = indexInset;
+    if (chromeInset > trailing) trailing = chromeInset;
+    if (minTrailing > trailing) trailing = minTrailing;
+    return trailing;
+}
+
+// Never drop the A–Z inset because contentView "looks" inset.
+// contentAlreadyInset > 0.5 → 0 was the reuse/mode-change bug:
+// the flag was true while the index still overlapped the band.
+static inline double ApolloDuoRailRowIndexConstraintInset(double indexInsetInContent,
+                                                          double contentAlreadyInset) {
+    (void)contentAlreadyInset;
+    return indexInsetInContent > 0.0 ? indexInsetInContent : 0.0;
+}
+
+// button.maxX = guideLeading - gap, expressed as a
+// contentView.trailingAnchor constant. When the guide sits at or
+// past content.maxX (false "already inset" frames), still reserve
+// guideWidth + gap so trailing cannot collapse to the 8pt floor.
+static inline double ApolloDuoRailRowStarTrailingFromGuide(double contentWidth,
+                                                           double guideLeadingInContent,
+                                                           double guideWidth,
+                                                           double gap) {
+    if (gap < 0.0) gap = 0.0;
+    if (guideWidth < 0.0) guideWidth = 0.0;
+    double fromWidth = guideWidth + gap;
+    if (contentWidth <= 0.0) return fromWidth;
+    if (guideLeadingInContent <= 0.5) return fromWidth;
+    double fromLead = contentWidth - guideLeadingInContent + gap;
+    return fromLead > fromWidth ? fromLead : fromWidth;
+}
+
+// Leftmost live guide: A–Z leading, or a trailing-side rail leading.
+static inline double ApolloDuoRailRowStarClearLeading(double indexLeading,
+                                                      double railLeading) {
+    int haveIndex = indexLeading > 0.5;
+    int haveRail = railLeading > 0.5;
+    if (haveIndex && haveRail) {
+        return indexLeading < railLeading ? indexLeading : railLeading;
+    }
+    if (haveIndex) return indexLeading;
+    if (haveRail) return railLeading;
+    return 0.0;
+}
+
+// First-paint reserve when the index is not laid out yet. Closed is
+// A–Z + gap only (stock tabs). Open adds a trailing-rail clear only
+// when the caller measured a trailing-side ApolloDuoRailView.
+static inline double ApolloDuoRailRowStarModeReserve(int mode,
+                                                     double indexWidth,
+                                                     double gap,
+                                                     double trailingRailClear) {
+    if (indexWidth < 0.0) indexWidth = 0.0;
+    if (gap < 0.0) gap = 0.0;
+    if (trailingRailClear < 0.0) trailingRailClear = 0.0;
+    if (mode != ApolloDuoModeOpen) trailingRailClear = 0.0;
+    return indexWidth + trailingRailClear + gap;
+}
+
+// Smoking-gun detector: a live index strip must not park on the floor.
+static inline int ApolloDuoRailRowStarTrailingCollapsesToFloor(double trailing,
+                                                              double floorTrailing,
+                                                              double indexWidth) {
+    if (indexWidth <= 0.5) return 0;
+    return trailing <= floorTrailing + 0.5;
+}
+
+static inline int ApolloDuoRailRowShouldUpdateStarTrailing(double haveConstant,
+                                                           double wantConstant) {
+    double gap = haveConstant - wantConstant;
+    if (gap < 0.0) gap = -gap;
+    return gap > 0.5;
+}
+
+// Full table+cell layoutIfNeeded only on appear / mode / rotation —
+// never on every scroll tick (that is the 25f8a7b hang class).
+static inline int ApolloDuoRailRowShouldForceLayout(int fromScroll) {
+    return fromScroll ? 0 : 1;
+}
+
+static inline int ApolloDuoRailRowShouldBeginLayoutPass(int alreadyInPass) {
+    return alreadyInPass ? 0 : 1;
+}
+
+static inline int ApolloDuoRailRowShouldScheduleStarRetry(int attempt,
+                                                          int hasStar,
+                                                          int needsNudge) {
+    if (attempt >= ApolloDuoRailRowStarRetryLimit) return 0;
+    if (!hasStar) return 1;
+    return needsNudge ? 1 : 0;
+}
+
+// Open window already landscape-wide, but contentView / table still
+// Closed or phone-column sized. Parking now is the first-open bug:
+// stars lock to the narrow maxX, then stillOff=NO so we stop.
+static inline int ApolloDuoRailRowContentLooksStaleForOpen(double contentWidth,
+                                                           double windowWidth,
+                                                           double windowHeight) {
+    if (contentWidth <= 0.0 || windowWidth <= 0.0) return 0;
+    if (ApolloDuoModeFromBounds(1, windowWidth, windowHeight) != ApolloDuoModeOpen
+        && ApolloDuoModeFromBounds(0, windowWidth, windowHeight) != ApolloDuoModeOpen) {
+        return 0;
+    }
+    double openFill = ApolloDuoRailContentFillWidthForMode(windowWidth, ApolloDuoModeOpen);
+    return contentWidth + (double)ApolloDuoRailLetterboxGap < openFill;
+}
+
+// contentView still a readable/Closed strip inside an already-wide cell.
+static inline int ApolloDuoRailRowContentViewLooksLetterboxed(double contentWidth,
+                                                              double cellWidth) {
+    if (contentWidth <= 0.0 || cellWidth <= 0.0) return 0;
+    return contentWidth + (double)ApolloDuoRailLetterboxGap < cellWidth;
+}
+
+// Stored mode is Open but the window is still 0×0 or Closed-sized.
+static inline int ApolloDuoRailRowOpenBoundsUnsettled(int mode,
+                                                      double windowWidth,
+                                                      double windowHeight) {
+    if (mode != ApolloDuoModeOpen) return 0;
+    if (windowWidth <= 0.0 || windowHeight <= 0.0) return 1;
+    return ApolloDuoModeFromBounds(1, windowWidth, windowHeight) != ApolloDuoModeOpen
+        && ApolloDuoModeFromBounds(0, windowWidth, windowHeight) != ApolloDuoModeOpen;
+}
+
+// Defer the contentView re-anchor until Open fill width is live.
+static inline int ApolloDuoRailRowShouldDeferOpenReanchor(int mode,
+                                                          double contentWidth,
+                                                          double tableWidth,
+                                                          double windowWidth,
+                                                          double windowHeight) {
+    if (ApolloDuoRailRowOpenBoundsUnsettled(mode, windowWidth, windowHeight)) {
+        return 1;
+    }
+    if (ApolloDuoRailRowContentLooksStaleForOpen(contentWidth, windowWidth, windowHeight)) {
+        return 1;
+    }
+    if (ApolloDuoRailRowContentLooksStaleForOpen(tableWidth, windowWidth, windowHeight)) {
+        return 1;
+    }
+    return 0;
+}
+
+// Do not nudge onto a stale Closed/narrow maxX. After the retry
+// budget, accept the current width so Closed/portrait can settle.
+static inline int ApolloDuoRailRowShouldAcceptCurrentContent(int attempt,
+                                                             int contentLooksStale) {
+    if (!contentLooksStale) return 1;
+    return attempt >= ApolloDuoRailRowStarRetryLimit ? 1 : 0;
+}
+
+static inline int ApolloDuoRailRowShouldNudgeStarIfReady(double haveMaxX,
+                                                         double wantMaxX,
+                                                         int contentLooksStale) {
+    if (contentLooksStale) return 0;
+    return ApolloDuoRailRowShouldNudgeStar(haveMaxX, wantMaxX);
+}
+
+// Retry when the star is missing, still off, or parked on stale
+// Closed geometry (the old 3-arg helper treats that as "on target").
+static inline int ApolloDuoRailRowShouldScheduleStarRetryForGeometry(int attempt,
+                                                                     int hasStar,
+                                                                     int needsNudge,
+                                                                     int contentLooksStale) {
+    if (attempt >= ApolloDuoRailRowStarRetryLimit) return 0;
+    if (contentLooksStale) return 1;
+    return ApolloDuoRailRowShouldScheduleStarRetry(attempt, hasStar, needsNudge);
+}
+
+// One deferred force-layout after appear/mode (Open bounds often
+// land on the next pass). Keep retrying only while still stale.
+// alreadyScheduled / attempt cap keeps this hang-safe.
+static inline int ApolloDuoRailRowShouldScheduleDeferredForce(int alreadyScheduled,
+                                                              int attempt,
+                                                              int fromForceLayout,
+                                                              int shouldDefer) {
+    if (alreadyScheduled) return 0;
+    if (attempt >= ApolloDuoRailRowStarRetryLimit) return 0;
+    if (shouldDefer) return 1;
+    return fromForceLayout && attempt == 0 ? 1 : 0;
+}
+
+// Open↔Closed (or any mode change) must drop a cached Closed column
+// so leftover margins / parked X cannot survive the next pass.
+static inline int ApolloDuoRailRowShouldClearCachedColumn(int hasLastMode,
+                                                          int lastMode,
+                                                          int newMode) {
+    if (!hasLastMode) return 0;
+    return lastMode != newMode;
+}
+
+static inline int ApolloDuoRailRowShouldRevisitMargins(double lastContentWidth,
+                                                       double contentWidth,
+                                                       int lastMode,
+                                                       int newMode) {
+    if (lastMode != newMode) return 1;
+    return contentWidth > lastContentWidth + (double)ApolloDuoRailLetterboxGap;
+}
+
+// Walk-search floor so a mid-pane first-paint star is still found.
+static inline double ApolloDuoRailRowStarSearchMinX(double contentWidth) {
+    if (contentWidth <= 0.0) return 0.0;
+    double frac = contentWidth * 0.15;
+    double floorX = (double)ApolloDuoRailRowStarSearchFloor;
+    return frac < floorX ? frac : floorX;
+}
+
+// Readable-centered leftover: a ~124pt leading on a wide cell. Stock
+// portrait is safe+16. Reset these on reuse so landscape mid-pane
+// margins cannot survive into Closed / a later Open pass.
+static inline int ApolloDuoRailRowMarginsLookCentered(double contentWidth,
+                                                      double marginLeft,
+                                                      double stockLead) {
+    if (contentWidth <= 0.0) return 0;
+    if (marginLeft < stockLead) marginLeft = stockLead;
+    return (marginLeft - stockLead) > 24.0;
+}
+
+static inline int ApolloDuoRailRowMarginsNeedReset(double contentWidth,
+                                                   double cellWidth,
+                                                   double marginLeft,
+                                                   double stockLead) {
+    if (ApolloDuoRailRowMarginsLookCentered(contentWidth, marginLeft, stockLead)) {
+        return 1;
+    }
+    return ApolloDuoRailRowContentViewLooksLetterboxed(contentWidth, cellWidth);
+}
+
+// Hit-proxy origin in contentView: center on the native star, do not
+// key off the cell's (possibly stale) bounds.
+static inline double ApolloDuoRailRowProxyMinX(double starMidX,
+                                               double proxyWidth,
+                                               double contentWidth) {
+    if (proxyWidth < 0.0) proxyWidth = 0.0;
+    double minX = starMidX - proxyWidth * 0.5;
+    double maxMinX = contentWidth - proxyWidth;
+    if (maxMinX < 0.0) maxMinX = 0.0;
+    if (minX < 0.0) minX = 0.0;
+    if (minX > maxMinX) minX = maxMinX;
+    return minX;
+}
+
+// Closed star helpers now use the shared far-right column. The
+// overlay-rail reservation (ClosedOverlayClearance) is leftover
+// math — do not apply it at runtime.
+static inline double ApolloDuoRailRowStarMaxXInContent(double contentWidth,
+                                                       double liveTrailing) {
+    return ApolloDuoRailRowStarColumnMaxX(contentWidth, liveTrailing);
+}
+
+static inline double ApolloDuoRailClosedStarMaxX(double cellWidth) {
+    return ApolloDuoRailRowStarMaxXInContent(cellWidth,
+                                             (double)ApolloDuoRailRowStarMinTrailing);
+}
+
+static inline double ApolloDuoRailClosedStarMinX(double cellWidth, double starWidth) {
+    return ApolloDuoRailRowStarColumnMinX(cellWidth, starWidth,
+                                          (double)ApolloDuoRailRowStarMinTrailing);
+}
+
+static inline int ApolloDuoRailClosedShouldNudgeStar(double starMaxX, double wantMaxX) {
+    return ApolloDuoRailRowShouldNudgeStar(starMaxX, wantMaxX);
 }
 
 // Cover / Compact + dual screens: extra trailing/bottom so FABs clear
@@ -352,8 +918,9 @@ static inline double ApolloDuoRailRowLeadDelta(double haveTextMinX,
     return delta;
 }
 
-// Star sits after the drawn text, not at RowMaxContentWidth (452) and
-// not on the first letter (titleMinX).
+// Legacy after-text cluster (title + gap). Host tests lock this so we
+// cannot silently revive the landscape path that dragged FAVORITES
+// names mid-pane. Runtime stars use ApolloDuoRailRowStarColumnMaxX.
 static inline double ApolloDuoRailRowStarMinX(double titleMinX,
                                               double textWidth,
                                               double gap) {
