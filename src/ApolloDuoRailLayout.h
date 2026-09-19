@@ -42,8 +42,10 @@ enum {
     ApolloDuoRailRowStarRetryLimit = 3,
     ApolloDuoRailRowStarSearchFloor = 48,
     /* Custom Duo star (not the native accessory). Size is the glyph;
-       hit slop is the button itself. Trailing is layoutMarginsGuide
-       minus this floor — immediately left of A–Z / trailing chrome. */
+       hit slop is the button itself. Pin to contentView.trailingAnchor
+       minus live A–Z + overlapping right-rail inset — never
+       layoutMarginsGuide (those shrink on scroll and collide with
+       the floating nav pill). */
     ApolloDuoRailRowStarButtonSize = 28,
     ApolloDuoRailRowStarButtonHit = 44,
     ApolloDuoCoverPillWidth = 80,   /* cover system pill; Compact only */
@@ -207,11 +209,9 @@ static inline double ApolloDuoRailClosedOverlayClearance(void) {
     return (double)ApolloDuoRailWidthClosed + (double)ApolloDuoRailClosedIndexWidth;
 }
 
-// Live trailing in *contentView* space after the table has finished
-// layout. Takes the largest of: layoutMargins.right, the A–Z index
-// strip (only if contentView is still full-bleed), and a small floor.
-// Never adds ClosedOverlayClearance (removed rail) and never uses
-// the leftover 38pt constant as the column itself.
+// Leftover helper: max(margins.right, A–Z strip, floor). Runtime no
+// longer uses layoutMargins — see ApolloDuoRailRowStarConstraintTrailing.
+// Host tests still lock this so a margins-only path cannot sneak back.
 static inline double ApolloDuoRailRowLiveStarTrailing(double marginRight,
                                                       double indexStrip,
                                                       double minTrailing) {
@@ -311,13 +311,34 @@ static inline int ApolloDuoRailRowPolishShouldApply(int mode) {
 }
 
 // Duo owns a custom star's appearance/position. Phone keeps Apollo's
-// native accessory. Constraint install is one-shot (25f8a7b hang).
+// native accessory. Reinstall on every configure / willDisplay /
+// open-close — one-shot claim left reused cells with a prior
+// subreddit binding and a stale trailing constant.
 static inline int ApolloDuoRailRowShouldInstallCustomStar(int mode) {
     return ApolloDuoRailRowPolishShouldApply(mode);
 }
 
+static inline int ApolloDuoRailRowShouldReinstallStar(int alreadyInstalled) {
+    (void)alreadyInstalled;
+    return 1;
+}
+
 static inline int ApolloDuoRailRowShouldClaimStarButton(int alreadyClaimed) {
-    return alreadyClaimed ? 0 : 1;
+    return ApolloDuoRailRowShouldReinstallStar(alreadyClaimed);
+}
+
+static inline int ApolloDuoRailRowShouldClearStarOnReuse(int hasCustomStar) {
+    (void)hasCustomStar;
+    return 1;
+}
+
+// Prior cell's name / missing superview / missing name = stale.
+// Never keep a reused row's frame or Favorite binding.
+static inline int ApolloDuoRailRowStarBindingIsStale(int hasName,
+                                                     int namesMatch,
+                                                     int hasSuperview) {
+    if (!hasName || !namesMatch || !hasSuperview) return 1;
+    return 0;
 }
 
 static inline int ApolloDuoRailRowStarShouldShowFilled(int inFavoritesList,
@@ -327,6 +348,48 @@ static inline int ApolloDuoRailRowStarShouldShowFilled(int inFavoritesList,
 
 static inline double ApolloDuoRailRowStarButtonTrailing(void) {
     return (double)ApolloDuoRailRowStarMinTrailing;
+}
+
+// View minX (already in contentView space) → trailing inset. 0 when
+// the view is missing, past the trailing edge, or on the leading
+// half (Open's left rail is not a trailing inset).
+static inline double ApolloDuoRailRowTrailingInsetFromMinX(double contentWidth,
+                                                           double minXInContent) {
+    if (contentWidth <= 0.0) return 0.0;
+    if (minXInContent <= contentWidth * 0.5) return 0.0;
+    if (minXInContent >= contentWidth) return 0.0;
+    return contentWidth - minXInContent;
+}
+
+// contentView.trailingAnchor constant. max(A–Z inset, overlapping
+// right chrome) then at least the 8pt floor. Never layoutMargins
+// and never ClosedOverlayClearance.
+static inline double ApolloDuoRailRowStarConstraintTrailing(double indexInset,
+                                                            double chromeInset,
+                                                            double minTrailing) {
+    if (indexInset < 0.0) indexInset = 0.0;
+    if (chromeInset < 0.0) chromeInset = 0.0;
+    if (minTrailing < 0.0) minTrailing = 0.0;
+    double trailing = indexInset;
+    if (chromeInset > trailing) trailing = chromeInset;
+    if (minTrailing > trailing) trailing = minTrailing;
+    return trailing;
+}
+
+// A–Z already ate contentView.width (index lives beside the cell).
+// Pinning to content.trailing is already left of the index — do not
+// add the strip a second time.
+static inline double ApolloDuoRailRowIndexConstraintInset(double indexInsetInContent,
+                                                          double contentAlreadyInset) {
+    if (contentAlreadyInset > 0.5) return 0.0;
+    return indexInsetInContent > 0.0 ? indexInsetInContent : 0.0;
+}
+
+static inline int ApolloDuoRailRowShouldUpdateStarTrailing(double haveConstant,
+                                                           double wantConstant) {
+    double gap = haveConstant - wantConstant;
+    if (gap < 0.0) gap = -gap;
+    return gap > 0.5;
 }
 
 // Full table+cell layoutIfNeeded only on appear / mode / rotation —

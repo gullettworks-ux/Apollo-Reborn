@@ -4,8 +4,10 @@
 // floating + wired to Apollo's tappedAddBarButtonItem:. Completes the
 // existing rail / Liquid Glass title path — does not retile the list
 // or pin a new A–Z overlay. Duo custom stars (Auto Layout, left of
-// A–Z) live in ApolloDuoRailTightenSubredditRow and are invoked from
-// here so Closed Duo still runs without an active rail.
+// A–Z and clear of the floating rail) live in
+// ApolloDuoRailTightenSubredditRow and are invoked from here so
+// Closed Duo still reinstalls them after Open↔Closed without an
+// active rail.
 
 __BEGIN_DECLS
 

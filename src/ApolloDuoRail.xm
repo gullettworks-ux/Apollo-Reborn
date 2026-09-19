@@ -123,15 +123,26 @@
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     %orig;
     if ([scrollView isKindOfClass:[UITableView class]]) {
-        ApolloDuoRailReanchorVisibleStars((UITableView *)scrollView);
+        ApolloDuoRailRefreshVisibleStars((UITableView *)scrollView);
     }
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = %orig;
+    (void)tableView;
+    (void)indexPath;
+    if (cell && ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) {
+        ApolloDuoRailPrepareSubredditRow(cell);
+        ApolloDuoRailTightenSubredditRow(cell);
+    }
+    return cell;
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
     %orig;
     (void)tableView;
     (void)indexPath;
-    if (!ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) return;
+    if (!cell || !ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) return;
     ApolloDuoRailPrepareSubredditRow(cell);
     ApolloDuoRailTightenSubredditRow(cell);
 }

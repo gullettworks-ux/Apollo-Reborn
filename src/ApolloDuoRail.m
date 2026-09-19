@@ -36,11 +36,12 @@ static void ApolloDuoRailCustomStarTapped(ApolloDuoStarButton *button);
 // Selected item uses the theme accent (blue on stock) as a rounded
 // pill. FeedSplit tiling stays off. After rail/safe-area insets,
 // RedditList hides Apollo's native star and installs a custom
-// Auto Layout star immediately left of A–Z / trailing chrome
-// (Open + Closed). Native stays in-tree as the favorite source of
-// truth; taps forward to it. After the table's final layout and
-// on every scroll tick, every visible cell is rebound (no native
-// frame nudges). Closed has no side rail.
+// Auto Layout star immediately left of A–Z and clear of the
+// floating nav rail (Open + Closed). Native stays in-tree as the
+// favorite source of truth; taps forward to it. Every configure,
+// willDisplay, and Open↔Closed pass tears down a stale association
+// and reapplies the live trailing constant — reuse never keeps a
+// prior cell's frame or subreddit binding. Closed has no side rail.
 //
 // Mode keys off UIWindow.bounds (never UIScreen.mainScreen). First
 // show defaults to Subs: stock popToRoot onto RedditList. Navigation
@@ -81,6 +82,8 @@ static char kApolloDuoRailRowLastModeKey;
 static char kApolloDuoRailRowLastContentWidthKey;
 static char kApolloDuoRailCustomStarKey;
 static char kApolloDuoRailCustomStarInstalledKey;
+static char kApolloDuoRailCustomStarConstraintsKey;
+static char kApolloDuoRailCustomStarTrailingKey;
 static char kApolloDuoRailNativeStarHiddenKey;
 static BOOL sApolloDuoRailDeferredScheduled = NO;
 static BOOL sApolloDuoRailAfterLayoutScheduled = NO;
@@ -1013,32 +1016,200 @@ static void ApolloDuoRailResetStaleRowMargins(UITableViewCell *cell) {
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-static void ApolloDuoRailRemoveCustomStar(UITableViewCell *cell) {
-    ApolloDuoStarButton *button = ApolloDuoRailCustomStarOnCell(cell);
-    [button removeFromSuperview];
-    objc_setAssociatedObject(cell, &kApolloDuoRailCustomStarKey, nil,
+static void ApolloDuoRailDeactivateStarConstraints(ApolloDuoStarButton *button) {
+    if (!button) return;
+    NSArray<NSLayoutConstraint *> *constraints =
+        objc_getAssociatedObject(button, &kApolloDuoRailCustomStarConstraintsKey);
+    if (constraints.count > 0) {
+        [NSLayoutConstraint deactivateConstraints:constraints];
+    }
+    objc_setAssociatedObject(button, &kApolloDuoRailCustomStarConstraintsKey, nil,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(button, &kApolloDuoRailCustomStarTrailingKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void ApolloDuoRailDetachCustomStar(UITableViewCell *cell) {
+    ApolloDuoStarButton *button = ApolloDuoRailCustomStarOnCell(cell);
+    if (button) {
+        button.nativeControl = nil;
+        button.subredditName = nil;
+        ApolloDuoRailDeactivateStarConstraints(button);
+        [button removeFromSuperview];
+    }
     objc_setAssociatedObject(cell, &kApolloDuoRailCustomStarInstalledKey, nil,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-static void ApolloDuoRailInstallCustomStarConstraints(ApolloDuoStarButton *button, UIView *content) {
+static void ApolloDuoRailRemoveCustomStar(UITableViewCell *cell) {
+    ApolloDuoRailDetachCustomStar(cell);
+    objc_setAssociatedObject(cell, &kApolloDuoRailCustomStarKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static UIView *ApolloDuoRailSectionIndexView(UITableView *tableView) {
+    if (!tableView) return nil;
+    for (UIView *subview in tableView.subviews) {
+        const char *name = class_getName(subview.class);
+        if (name && strstr(name, "TableViewIndex")) return subview;
+    }
+    return nil;
+}
+
+static BOOL ApolloDuoRailViewLooksLikeTrailingChrome(UIView *view) {
+    if (!view || view.hidden || view.alpha < 0.05) return NO;
+    const char *name = class_getName(view.class);
+    if (!name) return NO;
+    if (strstr(name, "DuoRailView") || strstr(name, "DuoStarButton")
+        || strstr(name, "StarHitProxy") || strstr(name, "TableViewIndex")
+        || strstr(name, "UITableView") || strstr(name, "UITableViewCell")
+        || strstr(name, "RedditList") || strstr(name, "NavigationBar")
+        || strstr(name, "UINavigationBar")) {
+        return NO;
+    }
+    if (strstr(name, "TabContainer") || strstr(name, "FloatingTab")
+        || strstr(name, "TabBar") || strstr(name, "Sidebar")
+        || [view isKindOfClass:[UITabBar class]]) {
+        return YES;
+    }
+    CGFloat width = CGRectGetWidth(view.bounds);
+    CGFloat height = CGRectGetHeight(view.bounds);
+    return width >= 36.0 && width <= 160.0 && height >= 160.0;
+}
+
+static void ApolloDuoRailCollectChromeMinX(UIView *view,
+                                          UIView *content,
+                                          CGFloat contentWidth,
+                                          CGFloat *bestMinX,
+                                          NSInteger *inspected,
+                                          NSInteger depth) {
+    if (!view || !content || !bestMinX || !inspected || depth < 0) return;
+    if (*inspected > 80) return;
+    *inspected += 1;
+    if (view == content || [view isDescendantOfView:content]) return;
+
+    if (ApolloDuoRailViewLooksLikeTrailingChrome(view)) {
+        CGRect inContent = [content convertRect:view.bounds fromView:view];
+        if (CGRectGetWidth(inContent) >= 1.0 && CGRectGetHeight(inContent) >= 1.0
+            && CGRectGetMaxX(inContent) > contentWidth * 0.55
+            && CGRectGetMinX(inContent) < contentWidth + 8.0) {
+            CGFloat minX = CGRectGetMinX(inContent);
+            if (minX > contentWidth * 0.5 && (*bestMinX < 0.0 || minX < *bestMinX)) {
+                *bestMinX = minX;
+            }
+        }
+    }
+    for (UIView *subview in view.subviews) {
+        ApolloDuoRailCollectChromeMinX(subview, content, contentWidth, bestMinX,
+                                       inspected, depth - 1);
+    }
+}
+
+static CGFloat ApolloDuoRailLiveIndexInset(UITableViewCell *cell, UIView *content) {
+    if (!cell || !content) return 0.0;
+    CGFloat contentWidth = CGRectGetWidth(content.bounds);
+    if (contentWidth < 1.0) contentWidth = CGRectGetWidth(cell.contentView.bounds);
+    if (contentWidth < 1.0) return 0.0;
+
+    CGFloat alreadyInset = (CGFloat)ApolloDuoRailRowIndexStrip((double)CGRectGetWidth(cell.bounds),
+                                                              (double)CGRectGetMaxX(content.frame));
+    UITableView *table = ApolloDuoRailTableForCell(cell);
+    UIView *index = ApolloDuoRailSectionIndexView(table);
+    CGFloat fromIndex = 0.0;
+    if (index && !index.hidden && CGRectGetWidth(index.bounds) > 0.5) {
+        CGRect inContent = [content convertRect:index.bounds fromView:index];
+        fromIndex = (CGFloat)ApolloDuoRailRowTrailingInsetFromMinX((double)contentWidth,
+                                                                  (double)CGRectGetMinX(inContent));
+        if (fromIndex < 0.5 && table) {
+            CGRect inTable = [table convertRect:index.bounds fromView:index];
+            if (CGRectGetMidX(inTable) > CGRectGetWidth(table.bounds) * 0.6) {
+                fromIndex = CGRectGetWidth(index.bounds);
+            }
+        }
+    }
+    return (CGFloat)ApolloDuoRailRowIndexConstraintInset((double)fromIndex, (double)alreadyInset);
+}
+
+static CGFloat ApolloDuoRailLiveChromeInset(UITableViewCell *cell, UIView *content) {
+    if (!cell || !content) return 0.0;
+    CGFloat contentWidth = CGRectGetWidth(content.bounds);
+    if (contentWidth < 1.0) return 0.0;
+
+    CGFloat bestMinX = -1.0;
+    NSInteger inspected = 0;
+    UITabBarController *tabs = (UITabBarController *)ApolloMainTabBarController();
+    if ([tabs isKindOfClass:[UITabBarController class]] && tabs.isViewLoaded) {
+        ApolloDuoRailCollectChromeMinX(tabs.view, content, contentWidth, &bestMinX,
+                                       &inspected, 4);
+        if (tabs.tabBar) {
+            ApolloDuoRailCollectChromeMinX(tabs.tabBar, content, contentWidth, &bestMinX,
+                                           &inspected, 2);
+        }
+    }
+    if (bestMinX < 0.0 && cell.window) {
+        inspected = 0;
+        for (UIView *subview in cell.window.subviews) {
+            ApolloDuoRailCollectChromeMinX(subview, content, contentWidth, &bestMinX,
+                                           &inspected, 3);
+        }
+    }
+    return (CGFloat)ApolloDuoRailRowTrailingInsetFromMinX((double)contentWidth, (double)bestMinX);
+}
+
+static CGFloat ApolloDuoRailLiveStarTrailing(UITableViewCell *cell, UIView *content) {
+    CGFloat indexInset = ApolloDuoRailLiveIndexInset(cell, content);
+    CGFloat chromeInset = ApolloDuoRailLiveChromeInset(cell, content);
+    return (CGFloat)ApolloDuoRailRowStarConstraintTrailing((double)indexInset,
+                                                          (double)chromeInset,
+                                                          (double)ApolloDuoRailRowStarMinTrailing);
+}
+
+static void ApolloDuoRailInstallCustomStarConstraints(ApolloDuoStarButton *button,
+                                                     UIView *content,
+                                                     CGFloat trailing) {
     if (!button || !content) return;
+    ApolloDuoRailDeactivateStarConstraints(button);
     button.translatesAutoresizingMaskIntoConstraints = NO;
     if (button.superview != content) {
         [button removeFromSuperview];
         [content addSubview:button];
     }
     CGFloat size = (CGFloat)ApolloDuoRailRowStarButtonHit;
-    [NSLayoutConstraint activateConstraints:@[
-        [button.trailingAnchor constraintEqualToAnchor:content.layoutMarginsGuide.trailingAnchor],
+    NSLayoutConstraint *trail =
+        [button.trailingAnchor constraintEqualToAnchor:content.trailingAnchor
+                                              constant:-trailing];
+    NSArray<NSLayoutConstraint *> *constraints = @[
+        trail,
         [button.centerYAnchor constraintEqualToAnchor:content.centerYAnchor],
         [button.widthAnchor constraintEqualToConstant:size],
         [button.heightAnchor constraintEqualToConstant:size],
-    ]];
+    ];
+    [NSLayoutConstraint activateConstraints:constraints];
+    objc_setAssociatedObject(button, &kApolloDuoRailCustomStarConstraintsKey, constraints,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(button, &kApolloDuoRailCustomStarTrailingKey, trail,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-static void ApolloDuoRailBindCustomStar(UITableViewCell *cell) {
+static void ApolloDuoRailApplyStarTrailing(ApolloDuoStarButton *button,
+                                          UIView *content,
+                                          CGFloat trailing,
+                                          BOOL reinstall) {
+    if (!button || !content) return;
+    NSLayoutConstraint *existing =
+        objc_getAssociatedObject(button, &kApolloDuoRailCustomStarTrailingKey);
+    BOOL sameHost = existing.firstItem == button && existing.secondItem == content;
+    if (!reinstall && sameHost) {
+        if (ApolloDuoRailRowShouldUpdateStarTrailing((double)existing.constant,
+                                                     (double)(-trailing))) {
+            existing.constant = -trailing;
+        }
+        return;
+    }
+    ApolloDuoRailInstallCustomStarConstraints(button, content, trailing);
+}
+
+static void ApolloDuoRailBindCustomStar(UITableViewCell *cell, BOOL reinstall) {
     if (!cell) return;
     int mode = ApolloDuoRailCurrentMode();
     UIControl *native = ApolloDuoRailNativeStarControl(cell);
@@ -1055,7 +1226,19 @@ static void ApolloDuoRailBindCustomStar(UITableViewCell *cell) {
 
     UIView *content = cell.contentView;
     if (!content) return;
+    NSString *name = ApolloDuoRailCellTitle(cell);
     ApolloDuoStarButton *button = ApolloDuoRailCustomStarOnCell(cell);
+    BOOL namesMatch = button.subredditName.length > 0
+        && name.length > 0
+        && [button.subredditName caseInsensitiveCompare:name] == NSOrderedSame;
+    BOOL stale = ApolloDuoRailRowStarBindingIsStale(button.subredditName.length > 0 ? 1 : 0,
+                                                    namesMatch ? 1 : 0,
+                                                    button.superview == content ? 1 : 0);
+    if (stale) {
+        ApolloDuoRailDetachCustomStar(cell);
+        button = ApolloDuoRailCustomStarOnCell(cell);
+        reinstall = YES;
+    }
     if (!button) {
         button = [ApolloDuoStarButton buttonWithType:UIButtonTypeSystem];
         button.adjustsImageWhenHighlighted = NO;
@@ -1064,19 +1247,22 @@ static void ApolloDuoRailBindCustomStar(UITableViewCell *cell) {
          forControlEvents:UIControlEventTouchUpInside];
         objc_setAssociatedObject(cell, &kApolloDuoRailCustomStarKey, button,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        reinstall = YES;
     }
     button.nativeControl = native;
-    button.subredditName = ApolloDuoRailCellTitle(cell);
+    button.subredditName = name;
     button.hidden = NO;
-    if (ApolloDuoRailRowShouldClaimStarButton(
-            objc_getAssociatedObject(cell, &kApolloDuoRailCustomStarInstalledKey) ? 1 : 0)) {
-        ApolloDuoRailInstallCustomStarConstraints(button, content);
-        objc_setAssociatedObject(cell, &kApolloDuoRailCustomStarInstalledKey, @YES,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    CGFloat trailing = ApolloDuoRailLiveStarTrailing(cell, content);
+    ApolloDuoRailApplyStarTrailing(button, content, trailing, reinstall);
+    objc_setAssociatedObject(cell, &kApolloDuoRailCustomStarInstalledKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     BOOL filled = ApolloDuoRailCellLooksFavorited(cell, native, button.subredditName);
     ApolloDuoRailPaintCustomStar(button, filled);
     [content bringSubviewToFront:button];
+    if (reinstall) {
+        ApolloLog(@"[ApolloDuoStar] bind name=%@ trailing=%.1f filled=%d",
+                  name ?: @"(none)", trailing, filled ? 1 : 0);
+    }
 }
 
 static CGFloat ApolloDuoRailWindowMinX(UIView *view) {
@@ -1109,11 +1295,8 @@ void ApolloDuoRailPrepareSubredditRow(UITableViewCell *cell) {
 
 void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell) {
     if (!cell) return;
-    ApolloDuoStarButton *button = ApolloDuoRailCustomStarOnCell(cell);
-    if (button) {
-        button.nativeControl = nil;
-        button.subredditName = nil;
-        button.hidden = YES;
+    if (ApolloDuoRailRowShouldClearStarOnReuse(ApolloDuoRailCustomStarOnCell(cell) ? 1 : 0)) {
+        ApolloDuoRailRemoveCustomStar(cell);
     }
     if (!ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoRailCurrentMode())) {
         ApolloDuoRailRestoreNativeStar(ApolloDuoRailNativeStarControl(cell));
@@ -1149,7 +1332,7 @@ void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell) {
     if (table && table.cellLayoutMarginsFollowReadableWidth) {
         table.cellLayoutMarginsFollowReadableWidth = NO;
     }
-    ApolloDuoRailBindCustomStar(cell);
+    ApolloDuoRailBindCustomStar(cell, YES);
 }
 
 static BOOL ApolloDuoRailTableLooksLikeRedditList(UITableView *tableView) {
@@ -1204,7 +1387,7 @@ void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayou
     if (sApolloDuoRailLastReanchorMode >= 0
         && ApolloDuoRailRowShouldClearCachedColumn(1, sApolloDuoRailLastReanchorMode, mode)) {
         for (UITableViewCell *cell in tableView.visibleCells) {
-            ApolloDuoRailClearRowColumnCache(cell);
+            ApolloDuoRailResetSubredditRowReuse(cell);
         }
         sApolloDuoRailDeferredAttempt = 0;
     }
@@ -1228,6 +1411,16 @@ void ApolloDuoRailReanchorVisibleStars(UITableView *tableView) {
     }
     for (UITableViewCell *cell in tableView.visibleCells) {
         ApolloDuoRailTightenSubredditRow(cell);
+    }
+}
+
+void ApolloDuoRailRefreshVisibleStars(UITableView *tableView) {
+    if (!tableView) return;
+    if (tableView.cellLayoutMarginsFollowReadableWidth) {
+        tableView.cellLayoutMarginsFollowReadableWidth = NO;
+    }
+    for (UITableViewCell *cell in tableView.visibleCells) {
+        ApolloDuoRailBindCustomStar(cell, NO);
     }
 }
 

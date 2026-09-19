@@ -299,9 +299,47 @@ int main(void) {
     Check(!ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModePhone),
           "regular iPhone keeps Apollo's native star");
     Check(ApolloDuoRailRowShouldClaimStarButton(0),
-          "custom star constraints are installed once");
-    Check(!ApolloDuoRailRowShouldClaimStarButton(1),
-          "already-claimed custom star constraints are not re-toggled");
+          "first configure installs the custom star");
+    Check(ApolloDuoRailRowShouldClaimStarButton(1),
+          "already-displayed cells still reinstall (no stale trailing)");
+    Check(ApolloDuoRailRowShouldReinstallStar(0) && ApolloDuoRailRowShouldReinstallStar(1),
+          "configure / willDisplay / open-close always reinstall the star");
+    Check(ApolloDuoRailRowShouldClearStarOnReuse(1)
+              && ApolloDuoRailRowShouldClearStarOnReuse(0),
+          "prepareForReuse always drops the prior subreddit binding");
+    Check(ApolloDuoRailRowStarBindingIsStale(0, 1, 1),
+          "a missing name is a stale star association");
+    Check(ApolloDuoRailRowStarBindingIsStale(1, 0, 1),
+          "a reused cell's prior subreddit name is stale");
+    Check(ApolloDuoRailRowStarBindingIsStale(1, 1, 0),
+          "a detached star button is a stale association");
+    Check(!ApolloDuoRailRowStarBindingIsStale(1, 1, 1),
+          "the current subreddit with a live button is not stale");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 940.0) == 60.0,
+          "overlapping right chrome becomes a contentView trailing inset");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 80.0) == 0.0,
+          "the leading Open rail is not a trailing inset");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(1000.0, 1000.0) == 0.0,
+          "chrome past the trailing edge is not an inset");
+    Check(ApolloDuoRailRowTrailingInsetFromMinX(400.0, 0.0) == 0.0,
+          "a missing chrome minX is not an inset");
+    Check(ApolloDuoRailRowStarConstraintTrailing(16.0, 0.0, 8.0) == 16.0,
+          "A–Z width wins over the floor when there is no rail overlap");
+    Check(ApolloDuoRailRowStarConstraintTrailing(16.0, 56.0, 8.0) == 56.0,
+          "overlapping right nav rail wins over A–Z");
+    Check(ApolloDuoRailRowStarConstraintTrailing(0.0, 0.0, 8.0) == 8.0,
+          "no A–Z / rail still keeps the 8pt floor");
+    Check(ApolloDuoRailRowStarConstraintTrailing(16.0, 56.0, 8.0)
+              != ApolloDuoRailClosedOverlayClearance(),
+          "live trailing is not the removed Closed overlay reservation");
+    Check(ApolloDuoRailRowIndexConstraintInset(16.0, 0.0) == 16.0,
+          "full-bleed contentView uses the live A–Z inset");
+    Check(ApolloDuoRailRowIndexConstraintInset(16.0, 16.0) == 0.0,
+          "an already-inset contentView does not add the A–Z strip twice");
+    Check(ApolloDuoRailRowShouldUpdateStarTrailing(-8.0, -56.0),
+          "trailing constant updates when A–Z / rail geometry changes");
+    Check(!ApolloDuoRailRowShouldUpdateStarTrailing(-16.0, -16.0),
+          "unchanged live trailing is a no-op");
     Check(ApolloDuoRailRowStarShouldShowFilled(1, 0),
           "a name in FavoriteSubreddits shows a filled star");
     Check(ApolloDuoRailRowStarShouldShowFilled(0, 1),
@@ -309,7 +347,7 @@ int main(void) {
     Check(!ApolloDuoRailRowStarShouldShowFilled(0, 0),
           "an unfavorited A–Z row shows an outline star");
     Check(ApolloDuoRailRowStarButtonTrailing() == (double)ApolloDuoRailRowStarMinTrailing,
-          "custom star sits the live min-trailing inset left of A–Z / margins");
+          "custom star floor is the 8pt min-trailing inset");
     Check(ApolloDuoRailRowStarButtonSize == 28 && ApolloDuoRailRowStarButtonHit == 44,
           "custom star glyph is 28pt inside a 44pt hit target");
     Check(ApolloDuoCoverPillWidth == 80 && ApolloDuoCoverPillBottom == 120,
