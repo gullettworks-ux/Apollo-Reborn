@@ -73,11 +73,20 @@ UIWindow *ApolloDeviceAppWindow(void);
 void ApolloDeviceExpandSceneToScreen(UIWindowScene *scene);
 
 /// Move `window` onto the preferred (inner) scene if needed, then size it
-/// to the scene/screen canvas. Safe on iOS 14 (missing APIs are skipped).
+/// to the scene/screen canvas. No-op when the window is already wide
+/// enough, or when a composer / text field is first responder (so
+/// become-key during typing cannot restamp geometry). Safe on iOS 14
+/// (missing APIs are skipped).
 void ApolloDeviceFillWindowToActiveCanvas(UIWindow *window);
 
-/// Fill the app window. Call from scene connect / activation / become-key.
+/// Fill the app window. Call from scene connect / activation. Becoming
+/// key is only a leftover-phone-column check now — not a geometry restamp.
 void ApolloDeviceFillAppWindowToActiveCanvas(void);
+
+/// YES when a composer sheet is on screen, a text input is first
+/// responder, or a keyboard window is up. Rail sync / canvas writes
+/// must stand down so they cannot steal the key window.
+BOOL ApolloDeviceShouldHoldCanvas(void);
 
 __END_DECLS
 #endif

@@ -57,8 +57,16 @@ static int ApolloDuoCompatibilityDualDisplays(void) {
 void ApolloDuoCompatibilityFillSoon(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *window = ApolloDeviceAppWindow();
+        BOOL hold = ApolloDeviceShouldHoldCanvas();
         ApolloDeviceFillWindowToActiveCanvas(window);
-        ApolloDuoRailSync();
+        // Rail frame writes / chrome apply on the presenting tree resign
+        // the composer first responder (and can key the cover Spotlight
+        // scene). Stand down while a sheet or text field is live.
+        if (!hold) {
+            ApolloDuoRailSync();
+        } else {
+            ApolloLog(@"[DuoCompatibility] holding canvas (composer / text input); skip rail sync");
+        }
         int dual = ApolloDuoCompatibilityDualDisplays();
         if (window && ApolloDuoModeFromWindow(window, dual) == ApolloDuoModePhone
             && ApolloDuoNeedsCanvasFill(window.bounds.size.width, window.bounds.size.height,
@@ -111,7 +119,8 @@ void ApolloDuoCompatibilityFillSoon(void) {
         if (CGRectIsEmpty(canvas) && scene.screen) canvas = scene.screen.bounds;
     }
     if (ApolloDuoNeedsCanvasFill(window.bounds.size.width, window.bounds.size.height,
-                                 canvas.size.width, canvas.size.height)) {
+                                 canvas.size.width, canvas.size.height)
+        && !ApolloDeviceShouldHoldCanvas()) {
         ApolloDuoCompatibilityFillSoon();
     }
 }
