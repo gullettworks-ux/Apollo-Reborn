@@ -1273,19 +1273,23 @@ static void ApolloSubredditIndexClearStarChrome(UIControl *control) {
 }
 
 static CGRect ApolloSubredditIndexProxyFrameForCell(UITableViewCell *cell, UIControl *nativeControl) {
-    CGFloat cellWidth = CGRectGetWidth(cell.bounds);
-    CGFloat cellHeight = CGRectGetHeight(cell.bounds);
-    CGFloat width = MIN(ApolloSubredditStarHitWidth, MAX(cellWidth, 0.0));
+    UIView *content = cell.contentView ?: cell;
+    CGFloat contentWidth = CGRectGetWidth(content.bounds);
+    CGFloat contentHeight = CGRectGetHeight(content.bounds);
+    if (contentWidth < 1.0) contentWidth = CGRectGetWidth(cell.bounds);
+    if (contentHeight < 1.0) contentHeight = CGRectGetHeight(cell.bounds);
+    CGFloat width = MIN(ApolloSubredditStarHitWidth, MAX(contentWidth, 0.0));
     CGFloat visibleWidth = MAX(width - MIN(ApolloSubredditStarHitTrailingInset, width), 0.0);
 
     if (!nativeControl) {
-        return CGRectMake(MAX(cellWidth - width, 0.0), 0.0, visibleWidth, cellHeight);
+        return CGRectMake(MAX(contentWidth - width, 0.0), 0.0, visibleWidth, contentHeight);
     }
 
-    CGRect nativeFrame = [cell convertRect:nativeControl.bounds fromView:nativeControl];
-    CGFloat minX = CGRectGetMidX(nativeFrame) - (width / 2.0);
-    minX = MIN(MAX(minX, 0.0), MAX(cellWidth - width, 0.0));
-    return CGRectMake(minX, 0.0, visibleWidth, cellHeight);
+    CGRect starFrame = [content convertRect:nativeControl.bounds fromView:nativeControl];
+    CGFloat minX = (CGFloat)ApolloDuoRailRowProxyMinX(CGRectGetMidX(starFrame),
+                                                     (double)width,
+                                                     (double)contentWidth);
+    return CGRectMake(minX, 0.0, visibleWidth, contentHeight);
 }
 
 static void ApolloSubredditIndexRemoveStarProxyFromCell(UITableViewCell *cell) {
@@ -1787,10 +1791,14 @@ static void ApolloSubredditIndexInstallStarProxyForCell(UITableViewCell *cell, U
         return;
     }
 
+    UIView *content = cell.contentView ?: cell;
     if (!proxy) {
         proxy = [[ApolloSubredditStarHitProxy alloc] initWithFrame:CGRectZero];
         objc_setAssociatedObject(cell, &kApolloSubredditStarProxyKey, proxy, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [cell addSubview:proxy];
+        [content addSubview:proxy];
+    } else if (proxy.superview != content) {
+        [proxy removeFromSuperview];
+        [content addSubview:proxy];
     }
 
     proxy.tableView = tableView;
@@ -1799,7 +1807,7 @@ static void ApolloSubredditIndexInstallStarProxyForCell(UITableViewCell *cell, U
     proxy.subredditName = ApolloSubredditIndexCellTitle(cell);
     proxy.frame = ApolloSubredditIndexProxyFrameForCell(cell, nativeControl);
     ApolloSubredditIndexClearStarChrome(nativeControl);
-    [cell bringSubviewToFront:proxy];
+    [content bringSubviewToFront:proxy];
 
     if (![objc_getAssociatedObject(cell, &kApolloSubredditStarProxyLoggedKey) boolValue]) {
         objc_setAssociatedObject(cell, &kApolloSubredditStarProxyLoggedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);

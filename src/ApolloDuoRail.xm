@@ -88,14 +88,47 @@
     ApolloDuoRailTightenSubredditRow((UITableViewCell *)self);
 }
 
+- (void)prepareForReuse {
+    ApolloDuoRailResetSubredditRowReuse((UITableViewCell *)self);
+    %orig;
+}
+
 %end
 
 %hook _TtC6Apollo24RedditListViewController
+
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ApolloDuoRailReanchorRedditList((UIViewController *)self, YES);
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    %orig;
+    (void)size;
+    [coordinator animateAlongsideTransition:nil
+                                 completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        (void)context;
+        ApolloDuoRailReanchorRedditList((UIViewController *)self, YES);
+    }];
+}
+
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    %orig;
+    if ([scrollView isKindOfClass:[UITableView class]]) {
+        ApolloDuoRailReanchorSubredditStars((UITableView *)scrollView, NO);
+    }
+}
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
     %orig;
     (void)tableView;
     (void)indexPath;
+    if (!ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) return;
+    ApolloDuoRailPrepareSubredditRow(cell);
+    [cell setNeedsLayout];
+    [cell layoutIfNeeded];
+    [cell.contentView layoutIfNeeded];
     ApolloDuoRailTightenSubredditRow(cell);
 }
 

@@ -116,35 +116,68 @@ int main(void) {
     Check(ApolloDuoRailClosedOverlayClearance() == 88.0,
           "Closed overlay-clearance math stays locked but is unused at runtime");
     Check(ApolloDuoRailRowStarTrailing == 38,
-          "Duo star column clears the A–Z strip, not a side rail");
+          "legacy 38pt constant stays locked and is not the runtime column");
+    Check(ApolloDuoRailRowStarMinTrailing == 8,
+          "live trailing floor is 8pt, not a fixed column X");
     Check(ApolloDuoRailSectionLineTrailing == 8,
           "section lines use an 8pt content-band gutter");
-    Check(ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeOpen) == 38.0
-              && ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeClosed) == 38.0,
-          "Open and Closed share one far-right star trailing");
+    Check(ApolloDuoRailRowLiveStarTrailing(8.0, 16.0, 8.0) == 16.0,
+          "live trailing prefers the A–Z strip over the floor");
+    Check(ApolloDuoRailRowLiveStarTrailing(20.0, 0.0, 8.0) == 20.0,
+          "live layoutMargins.right win when contentView is already inset");
+    Check(ApolloDuoRailRowLiveStarTrailing(0.0, 0.0, 8.0) == 8.0,
+          "a zero live inset still keeps the 8pt floor");
+    Check(ApolloDuoRailRowLiveStarTrailing(8.0, 0.0, 8.0)
+              != ApolloDuoRailClosedOverlayClearance(),
+          "live trailing does not reserve the removed Closed overlay rail");
+    Check(ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeOpen)
+              == ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeClosed),
+          "Open and Closed share one contentView-relative floor");
     Check(ApolloDuoRailRowStarTrailingForMode(ApolloDuoModePhone) == 0.0,
           "regular iPhone does not apply the Duo star column");
-    Check(ApolloDuoRailRowStarColumnMaxX(400.0, 38.0) == 362.0,
-          "a 400pt Closed/portrait row parks stars 38pt from the trailing edge");
-    Check(ApolloDuoRailRowStarColumnMaxX(920.0, 38.0) == 882.0,
-          "a wide Open row uses the same far-right column, not a mid-pane cluster");
-    Check(ApolloDuoRailRowStarColumnMinX(400.0, 28.0, 38.0) == 334.0,
-          "star origin is column maxX minus star width");
+    Check(ApolloDuoRailRowStarMaxXInContent(400.0, 16.0) == 384.0,
+          "Closed contentView parks the star at content.maxX minus live trailing");
+    Check(ApolloDuoRailRowStarMaxXInContent(880.0, 16.0) == 864.0,
+          "Open contentView (after the left rail) uses the same trailing formula");
     Check(ApolloDuoRailRowStarColumnMaxX(400.0, 38.0)
               != 400.0 - ApolloDuoRailClosedOverlayClearance(),
-          "far-right column does not reserve the removed Closed overlay rail");
-    Check(ApolloDuoRailClosedStarMaxX(400.0) == 362.0,
-          "ClosedStarMaxX now aliases the shared column");
-    Check(ApolloDuoRailClosedStarMinX(400.0, 28.0) == 334.0,
-          "ClosedStarMinX now aliases the shared column");
-    Check(ApolloDuoRailRowShouldNudgeStar(250.0, 362.0),
-          "a mid-column star must be nudged to the far-right column");
-    Check(!ApolloDuoRailRowShouldNudgeStar(362.0, 362.0),
-          "an already-anchored star is a no-op");
-    Check(ApolloDuoRailClosedShouldNudgeStar(250.0, 362.0),
-          "Closed nudge helper matches the shared column");
-    Check(!ApolloDuoRailClosedShouldNudgeStar(362.0, 362.0),
-          "an already-anchored Closed star is a no-op");
+          "even the leftover 38pt math is not the 88pt overlay column");
+    Check(ApolloDuoRailClosedStarMaxX(400.0) == 392.0,
+          "ClosedStarMaxX aliases contentView maxX minus the 8pt floor");
+    Check(ApolloDuoRailClosedStarMinX(400.0, 28.0) == 364.0,
+          "ClosedStarMinX is that column minus star width");
+    Check(ApolloDuoRailRowShouldNudgeStar(250.0, 384.0),
+          "a mid-column first-paint star must be re-anchored after layout");
+    Check(!ApolloDuoRailRowShouldNudgeStar(384.0, 384.0),
+          "an already-anchored contentView star is a no-op");
+    Check(ApolloDuoRailRowShouldForceLayout(0),
+          "appear / mode / rotation may force table+cell layoutIfNeeded");
+    Check(!ApolloDuoRailRowShouldForceLayout(1),
+          "scroll must not force layoutIfNeeded (25f8a7b hang class)");
+    Check(ApolloDuoRailRowShouldBeginLayoutPass(0),
+          "a layout pass may start when none is running");
+    Check(!ApolloDuoRailRowShouldBeginLayoutPass(1),
+          "a nested layoutIfNeeded pass is refused");
+    Check(ApolloDuoRailRowShouldScheduleStarRetry(0, 0, 0),
+          "first paint with no star yet schedules a retry");
+    Check(ApolloDuoRailRowShouldScheduleStarRetry(0, 1, 1),
+          "a still-wrong star after the first pass retries");
+    Check(!ApolloDuoRailRowShouldScheduleStarRetry(0, 1, 0),
+          "a correctly anchored star does not retry");
+    Check(!ApolloDuoRailRowShouldScheduleStarRetry(3, 0, 1),
+          "retries stop at the bounded limit");
+    Check(ApolloDuoRailRowStarSearchMinX(880.0) == 48.0,
+          "wide first-paint search still finds a mid-pane star");
+    Check(ApolloDuoRailRowStarSearchMinX(200.0) == 30.0,
+          "narrow content uses 15% rather than a 40% miss");
+    Check(ApolloDuoRailRowMarginsLookCentered(920.0, 124.0, 16.0),
+          "readable-centered leftover margins must be reset on reuse");
+    Check(!ApolloDuoRailRowMarginsLookCentered(400.0, 16.0, 16.0),
+          "stock portrait margins are not a leftover landscape column");
+    Check(ApolloDuoRailRowProxyMinX(384.0, 60.0, 400.0) == 340.0,
+          "hit proxy centers on the native star and clamps to contentView");
+    Check(ApolloDuoRailRowProxyMinX(20.0, 60.0, 400.0) == 0.0,
+          "proxy origin clamps to contentView");
     Check(ApolloDuoRailRowTitleMaxWidth(16.0, 334.0, 12.0) == 306.0,
           "title may use the band up to the star column");
     Check(ApolloDuoRailRowShouldShrinkTitle(800.0, 306.0),

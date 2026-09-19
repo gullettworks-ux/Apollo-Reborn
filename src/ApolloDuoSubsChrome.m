@@ -447,7 +447,8 @@ void ApolloDuoSubsChromeApply(UIViewController *controller) {
             }
         }
         if ([table isKindOfClass:[UITableView class]]) {
-            ApolloDuoRailPolishSubredditList(table);
+            BOOL first = !objc_getAssociatedObject(controller, &kApolloDuoSubsChromeAppliedKey);
+            ApolloDuoRailReanchorSubredditStars(table, first);
         }
     }
 

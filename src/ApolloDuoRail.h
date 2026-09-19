@@ -38,16 +38,28 @@ void ApolloDuoRailClearOpenContent(void);
 /// Favorite/sub rows get rail clearance only — no wide-row star cluster.
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 
-/// Duo-only (Open + Closed): pin the favorite star to the shared
-/// far-right column and release any leftover 25f8a7b claim. Frame
-/// nudge is hang-safe (skip when already on target; claim star
-/// constraints once). No-op on regular iPhone and on rows without a
-/// star. Does not move titles.
+/// Duo-only: re-anchor one cell's native star in contentView
+/// coordinates after that cell has finished layout. No
+/// layoutIfNeeded (safe from layoutSubviews). No-op on Phone.
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
 
-/// Duo RedditList only: turn off readable-width letterboxing and
-/// tighten visible starred rows. Cheap no-op on other tables.
+/// Re-anchor visible RedditList stars. forceLayout YES runs the
+/// table+cell layoutIfNeeded pass (appear / mode / rotation only).
+/// forceLayout NO is scroll / layoutSubviews (frame nudge only).
+void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout);
+
+/// Duo RedditList: re-anchor without forcing layout.
 void ApolloDuoRailPolishSubredditList(UITableView *tableView);
+
+/// Clear leftover readable/center margins on reuse so a landscape
+/// mid-pane column cannot survive into the next mode.
+void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell);
+
+/// One-shot readable/center margin reset. Not for layoutSubviews.
+void ApolloDuoRailPrepareSubredditRow(UITableViewCell *cell);
+
+/// RedditList only: find its table and re-anchor. forceLayout as above.
+void ApolloDuoRailReanchorRedditList(UIViewController *controller, BOOL forceLayout);
 
 /// Open: 0 (stock A–Z). Closed has no rail, so this is also 0 at
 /// runtime (IsActive is NO).
