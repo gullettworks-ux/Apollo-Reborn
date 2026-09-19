@@ -55,8 +55,10 @@
     if (ApolloDuoRailIsActive()) {
         ApolloDuoRailApplyListInsets((UIScrollView *)self);
         ApolloDuoRailPinSectionIndex((UITableView *)self);
+        ApolloDuoRailReanchorVisibleStarsAfterLayout((UITableView *)self);
     } else if (ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) {
         ApolloDuoRailPolishSubredditList((UITableView *)self);
+        ApolloDuoRailReanchorVisibleStarsAfterLayout((UITableView *)self);
     }
 }
 
@@ -97,6 +99,11 @@
 
 %hook _TtC6Apollo24RedditListViewController
 
+- (void)viewDidLayoutSubviews {
+    %orig;
+    ApolloDuoRailReanchorRedditList((UIViewController *)self, NO);
+}
+
 - (void)viewDidAppear:(BOOL)animated {
     %orig;
     ApolloDuoRailReanchorRedditList((UIViewController *)self, YES);
@@ -116,7 +123,7 @@
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView {
     %orig;
     if ([scrollView isKindOfClass:[UITableView class]]) {
-        ApolloDuoRailReanchorSubredditStars((UITableView *)scrollView, NO);
+        ApolloDuoRailReanchorVisibleStars((UITableView *)scrollView);
     }
 }
 

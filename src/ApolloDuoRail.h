@@ -51,11 +51,19 @@ void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
 /// width). Open↔Closed clears any cached Closed column.
 void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout);
 
+/// Tighten every currently visible cell. No layoutIfNeeded. Used
+/// after the table's final layout and on every scroll tick.
+void ApolloDuoRailReanchorVisibleStars(UITableView *tableView);
+
+/// Coalesced next-turn ReanchorVisibleStars after table/VC layout
+/// so cells that did not receive layoutSubviews still get the column.
+void ApolloDuoRailReanchorVisibleStarsAfterLayout(UITableView *tableView);
+
 /// Duo RedditList: re-anchor without forcing layout.
 void ApolloDuoRailPolishSubredditList(UITableView *tableView);
 
-/// Clear leftover readable/center margins on reuse so a landscape
-/// mid-pane column cannot survive into the next mode.
+/// Clear leftover readable/center margins, claimed star constraints,
+/// and the hit proxy on reuse so a recycled row cannot keep a wrong column.
 void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell);
 
 /// One-shot readable/center margin reset. Not for layoutSubviews.

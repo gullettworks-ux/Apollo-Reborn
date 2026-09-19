@@ -219,6 +219,19 @@ static inline double ApolloDuoRailRowLiveStarTrailing(double marginRight,
     return trailing;
 }
 
+// Live A–Z strip from cell vs contentView frames. A real index width
+// (~16pt) is the trailing edge — do not zero it.
+static inline double ApolloDuoRailRowIndexStrip(double cellWidth, double contentMaxX) {
+    double strip = cellWidth - contentMaxX;
+    return strip > 0.0 ? strip : 0.0;
+}
+
+// After UITableView layoutSubviews: one coalesced next-turn walk of
+// every visible cell. No layoutIfNeeded (scroll/layout hang class).
+static inline int ApolloDuoRailRowShouldScheduleAfterLayoutPass(int alreadyScheduled) {
+    return alreadyScheduled ? 0 : 1;
+}
+
 // Open and Closed share one contentView-relative formula. Phone is 0
 // so callers can skip. The leftover 38pt constant is not the column.
 static inline double ApolloDuoRailRowStarTrailingForMode(int mode) {
@@ -249,6 +262,21 @@ static inline int ApolloDuoRailRowShouldNudgeStar(double haveMaxX, double wantMa
     double gap = wantMaxX - haveMaxX;
     if (gap < 0.0) gap = -gap;
     return gap > 0.5;
+}
+
+// Star maxX immediately left of the live A–Z edge when that edge is
+// in/at this contentView. Otherwise content.maxX minus liveTrailing.
+static inline double ApolloDuoRailRowStarMaxXLeftOfIndex(double contentWidth,
+                                                         double indexMinXInContent,
+                                                         double liveTrailing) {
+    if (indexMinXInContent > 0.5 && indexMinXInContent <= contentWidth + 0.5) {
+        return indexMinXInContent;
+    }
+    return ApolloDuoRailRowStarColumnMaxX(contentWidth, liveTrailing);
+}
+
+static inline int ApolloDuoRailRowStarIsOutlier(double haveMaxX, double wantMaxX) {
+    return ApolloDuoRailRowShouldNudgeStar(haveMaxX, wantMaxX);
 }
 
 // Width-only clamp so a stretchy title cannot run under the star

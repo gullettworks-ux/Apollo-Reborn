@@ -121,6 +121,26 @@ int main(void) {
           "live trailing floor is 8pt, not a fixed column X");
     Check(ApolloDuoRailSectionLineTrailing == 8,
           "section lines use an 8pt content-band gutter");
+    Check(ApolloDuoRailRowIndexStrip(1013.0, 997.0) == 16.0,
+          "live A–Z strip is cell.width minus content.maxX");
+    Check(ApolloDuoRailRowIndexStrip(1013.0, 1013.0) == 0.0,
+          "a full-bleed contentView has no index strip");
+    Check(ApolloDuoRailRowIndexStrip(400.0, 416.0) == 0.0,
+          "a contentView past the cell edge is not a negative strip");
+    Check(ApolloDuoRailRowStarMaxXLeftOfIndex(1013.0, 997.0, 8.0) == 997.0,
+          "star maxX sits immediately left of the live A–Z edge");
+    Check(ApolloDuoRailRowStarMaxXLeftOfIndex(997.0, 1100.0, 8.0) == 989.0,
+          "an A–Z edge outside contentView falls back to live trailing");
+    Check(ApolloDuoRailRowStarMaxXLeftOfIndex(1013.0, 0.0, 8.0) == 1005.0,
+          "a missing index uses content.maxX minus live trailing");
+    Check(ApolloDuoRailRowStarIsOutlier(250.0, 997.0),
+          "a mid-pane star is an outlier vs the A–Z column");
+    Check(!ApolloDuoRailRowStarIsOutlier(997.0, 997.0),
+          "a star on the live A–Z column is not an outlier");
+    Check(ApolloDuoRailRowShouldScheduleAfterLayoutPass(0),
+          "after table layout, one next-turn visible-cell pass may run");
+    Check(!ApolloDuoRailRowShouldScheduleAfterLayoutPass(1),
+          "after-layout re-anchor is coalesced (hang-safe)");
     Check(ApolloDuoRailRowLiveStarTrailing(8.0, 16.0, 8.0) == 16.0,
           "live trailing prefers the A–Z strip over the floor");
     Check(ApolloDuoRailRowLiveStarTrailing(20.0, 0.0, 8.0) == 20.0,
