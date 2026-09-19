@@ -38,10 +38,16 @@ void ApolloDuoRailClearOpenContent(void);
 /// Favorite/sub rows get rail clearance only — no wide-row star cluster.
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 
-/// No-op. Per-cell readable / centerX / lead-delta thrash hung the Duo
-/// sim (25f8a7b) and still left the wrong layout. Releases any leftover
-/// constraint claim. Expanded Duo rows are a later patch.
+/// Duo-only (Open + Closed): pin the favorite star to the shared
+/// far-right column and release any leftover 25f8a7b claim. Frame
+/// nudge is hang-safe (skip when already on target; claim star
+/// constraints once). No-op on regular iPhone and on rows without a
+/// star. Does not move titles.
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
+
+/// Duo RedditList only: turn off readable-width letterboxing and
+/// tighten visible starred rows. Cheap no-op on other tables.
+void ApolloDuoRailPolishSubredditList(UITableView *tableView);
 
 /// Open: 0 (stock A–Z). Closed has no rail, so this is also 0 at
 /// runtime (IsActive is NO).

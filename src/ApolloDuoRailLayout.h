@@ -32,6 +32,13 @@ enum {
        FAVORITES titles mid-pane. Portrait (stock RedditList) is the look. */
     ApolloDuoRailRowMaxContentWidth = 480,
     ApolloDuoRailRowStarGap = 28,
+    /* Far-right star column / section-line gutters. Same in Open and
+       Closed — Closed no longer has an overlay rail, so do not add
+       ApolloDuoRailClosedOverlayClearance (88pt) here. 38 matches the
+       existing subreddit-list A–Z clearance; 8 is a hairline gutter. */
+    ApolloDuoRailRowStarTrailing = 38,
+    ApolloDuoRailSectionLineTrailing = 8,
+    ApolloDuoRailRowTitleStarGap = 12,
     ApolloDuoCoverPillWidth = 80,   /* cover system pill; Compact only */
     ApolloDuoCoverPillBottom = 120, /* lift FABs above the cover gear */
     /* Subs nav chrome (title / Edit / floating +). Insets only the
@@ -186,28 +193,86 @@ static inline double ApolloDuoRailSectionIndexTrailing(void) {
     return ApolloDuoRailSectionIndexTrailingForMode(ApolloDuoModeOpen);
 }
 
-// Visible trailing chrome on a full-bleed Closed row: overlay rail +
-// the A–Z that sits beside it. Stars / header lines stop here.
+// Leftover Closed overlay math (rail + A–Z). Not applied to stars or
+// section lines — Closed has no side rail. Host tests lock the number
+// so we cannot silently reuse it as a trailing inset.
 static inline double ApolloDuoRailClosedOverlayClearance(void) {
     return (double)ApolloDuoRailWidthClosed + (double)ApolloDuoRailClosedIndexWidth;
 }
 
-static inline double ApolloDuoRailClosedStarMaxX(double cellWidth) {
+// Trailing inset for the favorite-star column. Open and Closed share
+// one number (A–Z only). Phone callers should not use this.
+static inline double ApolloDuoRailRowStarTrailingForMode(int mode) {
+    if (mode != ApolloDuoModeOpen && mode != ApolloDuoModeClosed) return 0.0;
+    return (double)ApolloDuoRailRowStarTrailing;
+}
+
+// Far-right star column. Same cell-local maxX on every starred row
+// (Favorites and A–Z). Does not key off title width and does not
+// reserve the removed Closed overlay rail.
+static inline double ApolloDuoRailRowStarColumnMaxX(double cellWidth,
+                                                    double trailing) {
     if (cellWidth <= 0.0) return 0.0;
-    double maxX = cellWidth - ApolloDuoRailClosedOverlayClearance();
+    if (trailing < 0.0) trailing = 0.0;
+    double maxX = cellWidth - trailing;
     return maxX > 0.0 ? maxX : 0.0;
 }
 
-static inline double ApolloDuoRailClosedStarMinX(double cellWidth, double starWidth) {
+static inline double ApolloDuoRailRowStarColumnMinX(double cellWidth,
+                                                    double starWidth,
+                                                    double trailing) {
     if (starWidth < 0.0) starWidth = 0.0;
-    double minX = ApolloDuoRailClosedStarMaxX(cellWidth) - starWidth;
+    double minX = ApolloDuoRailRowStarColumnMaxX(cellWidth, trailing) - starWidth;
     return minX > 0.0 ? minX : 0.0;
 }
 
-static inline int ApolloDuoRailClosedShouldNudgeStar(double starMaxX, double wantMaxX) {
-    double gap = wantMaxX - starMaxX;
+static inline int ApolloDuoRailRowShouldNudgeStar(double haveMaxX, double wantMaxX) {
+    double gap = wantMaxX - haveMaxX;
     if (gap < 0.0) gap = -gap;
     return gap > 0.5;
+}
+
+// Width-only clamp so a stretchy title cannot run under the star
+// column. Origin stays put (left-aligned).
+static inline double ApolloDuoRailRowTitleMaxWidth(double titleMinX,
+                                                   double starMinX,
+                                                   double gap) {
+    if (gap < 0.0) gap = 0.0;
+    double width = starMinX - gap - titleMinX;
+    return width > 0.0 ? width : 0.0;
+}
+
+static inline int ApolloDuoRailRowShouldShrinkTitle(double haveWidth, double wantWidth) {
+    return haveWidth > wantWidth + 0.5;
+}
+
+// Section divider (FAVORITES / MODERATOR / A) ends at the content
+// trailing gutter — full-width of the usable band, not a readable
+// column and not 88pt inland of a removed overlay rail.
+static inline double ApolloDuoRailSectionLineMaxX(double headerWidth,
+                                                  double trailing) {
+    return ApolloDuoRailRowStarColumnMaxX(headerWidth, trailing);
+}
+
+static inline int ApolloDuoRailRowPolishShouldApply(int mode) {
+    return mode == ApolloDuoModeOpen || mode == ApolloDuoModeClosed;
+}
+
+// Closed star helpers now use the shared far-right column. The
+// overlay-rail reservation (ClosedOverlayClearance) is leftover
+// math — do not apply it at runtime.
+static inline double ApolloDuoRailClosedStarMaxX(double cellWidth) {
+    return ApolloDuoRailRowStarColumnMaxX(cellWidth,
+                                          (double)ApolloDuoRailRowStarTrailing);
+}
+
+static inline double ApolloDuoRailClosedStarMinX(double cellWidth, double starWidth) {
+    return ApolloDuoRailRowStarColumnMinX(cellWidth, starWidth,
+                                          (double)ApolloDuoRailRowStarTrailing);
+}
+
+static inline int ApolloDuoRailClosedShouldNudgeStar(double starMaxX, double wantMaxX) {
+    return ApolloDuoRailRowShouldNudgeStar(starMaxX, wantMaxX);
 }
 
 // Cover / Compact + dual screens: extra trailing/bottom so FABs clear
@@ -352,8 +417,9 @@ static inline double ApolloDuoRailRowLeadDelta(double haveTextMinX,
     return delta;
 }
 
-// Star sits after the drawn text, not at RowMaxContentWidth (452) and
-// not on the first letter (titleMinX).
+// Legacy after-text cluster (title + gap). Host tests lock this so we
+// cannot silently revive the landscape path that dragged FAVORITES
+// names mid-pane. Runtime stars use ApolloDuoRailRowStarColumnMaxX.
 static inline double ApolloDuoRailRowStarMinX(double titleMinX,
                                               double textWidth,
                                               double gap) {

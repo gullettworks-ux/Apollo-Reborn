@@ -2393,7 +2393,11 @@ static void ApolloSubredditIndexStyleHeaderView(UIView *header, UITableView *tab
         }
         headerX = (CGFloat)ApolloDuoRailHeaderTitleMinX(windowX, (double)ApolloDuoRailRowStockLead);
     }
-    label.frame = CGRectMake(headerX, 0.0, MAX(CGRectGetWidth(header.bounds) - headerX - 54.0, 0.0), CGRectGetHeight(header.bounds));
+    CGFloat headerWidth = CGRectGetWidth(header.bounds);
+    int duoMode = ApolloDuoCurrentMode();
+    BOOL duoRows = ApolloDuoRailRowPolishShouldApply(duoMode);
+    CGFloat titleTrail = duoRows ? (CGFloat)ApolloDuoRailSectionLineTrailing : 54.0;
+    label.frame = CGRectMake(headerX, 0.0, MAX(headerWidth - headerX - titleTrail, 0.0), CGRectGetHeight(header.bounds));
 
     if (!separator) {
         separator = [[UIView alloc] initWithFrame:CGRectZero];
@@ -2408,7 +2412,13 @@ static void ApolloSubredditIndexStyleHeaderView(UIView *header, UITableView *tab
     CGFloat lineHeight = 2.0;
     CGSize labelSize = [text sizeWithAttributes:@{ NSFontAttributeName: label.font }];
     CGFloat lineX = CGRectGetMinX(label.frame) + ceil(labelSize.width) + 12.0;
-    CGFloat lineWidth = MAX(CGRectGetWidth(header.bounds) - lineX - 8.0, 0.0);
+    CGFloat lineTrailing = duoRows
+        ? (CGFloat)ApolloDuoRailSectionLineTrailing
+        : 8.0;
+    CGFloat lineMaxX = duoRows
+        ? (CGFloat)ApolloDuoRailSectionLineMaxX((double)headerWidth, (double)lineTrailing)
+        : (headerWidth - lineTrailing);
+    CGFloat lineWidth = MAX(lineMaxX - lineX, 0.0);
     CGFloat lineY = floor(CGRectGetMidY(header.bounds) - (lineHeight / 2.0));
     separator.frame = CGRectMake(lineX, lineY, lineWidth, lineHeight);
 

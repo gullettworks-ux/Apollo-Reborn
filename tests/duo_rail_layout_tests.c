@@ -114,15 +114,52 @@ int main(void) {
     Check(ApolloDuoRailClosedContentIsCrushed(280.0, 400.0),
           "reserving ~120pt on a 400pt Closed list is the 20–25% crush");
     Check(ApolloDuoRailClosedOverlayClearance() == 88.0,
-          "Closed visible trailing chrome is rail + A–Z");
-    Check(ApolloDuoRailClosedStarMaxX(400.0) == 312.0,
-          "Closed star sits at the visible row trailing edge");
-    Check(ApolloDuoRailClosedStarMinX(400.0, 28.0) == 284.0,
-          "Closed star origin is just left of A–Z");
-    Check(ApolloDuoRailClosedShouldNudgeStar(250.0, 312.0),
-          "a mid-column Closed star must be nudged to the row edge");
-    Check(!ApolloDuoRailClosedShouldNudgeStar(312.0, 312.0),
+          "Closed overlay-clearance math stays locked but is unused at runtime");
+    Check(ApolloDuoRailRowStarTrailing == 38,
+          "Duo star column clears the A–Z strip, not a side rail");
+    Check(ApolloDuoRailSectionLineTrailing == 8,
+          "section lines use an 8pt content-band gutter");
+    Check(ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeOpen) == 38.0
+              && ApolloDuoRailRowStarTrailingForMode(ApolloDuoModeClosed) == 38.0,
+          "Open and Closed share one far-right star trailing");
+    Check(ApolloDuoRailRowStarTrailingForMode(ApolloDuoModePhone) == 0.0,
+          "regular iPhone does not apply the Duo star column");
+    Check(ApolloDuoRailRowStarColumnMaxX(400.0, 38.0) == 362.0,
+          "a 400pt Closed/portrait row parks stars 38pt from the trailing edge");
+    Check(ApolloDuoRailRowStarColumnMaxX(920.0, 38.0) == 882.0,
+          "a wide Open row uses the same far-right column, not a mid-pane cluster");
+    Check(ApolloDuoRailRowStarColumnMinX(400.0, 28.0, 38.0) == 334.0,
+          "star origin is column maxX minus star width");
+    Check(ApolloDuoRailRowStarColumnMaxX(400.0, 38.0)
+              != 400.0 - ApolloDuoRailClosedOverlayClearance(),
+          "far-right column does not reserve the removed Closed overlay rail");
+    Check(ApolloDuoRailClosedStarMaxX(400.0) == 362.0,
+          "ClosedStarMaxX now aliases the shared column");
+    Check(ApolloDuoRailClosedStarMinX(400.0, 28.0) == 334.0,
+          "ClosedStarMinX now aliases the shared column");
+    Check(ApolloDuoRailRowShouldNudgeStar(250.0, 362.0),
+          "a mid-column star must be nudged to the far-right column");
+    Check(!ApolloDuoRailRowShouldNudgeStar(362.0, 362.0),
+          "an already-anchored star is a no-op");
+    Check(ApolloDuoRailClosedShouldNudgeStar(250.0, 362.0),
+          "Closed nudge helper matches the shared column");
+    Check(!ApolloDuoRailClosedShouldNudgeStar(362.0, 362.0),
           "an already-anchored Closed star is a no-op");
+    Check(ApolloDuoRailRowTitleMaxWidth(16.0, 334.0, 12.0) == 306.0,
+          "title may use the band up to the star column");
+    Check(ApolloDuoRailRowShouldShrinkTitle(800.0, 306.0),
+          "a stretchy wide title must shrink before the star");
+    Check(!ApolloDuoRailRowShouldShrinkTitle(300.0, 306.0),
+          "a title that already clears the star is a no-op");
+    Check(ApolloDuoRailSectionLineMaxX(400.0, 8.0) == 392.0,
+          "Closed section lines span the content band");
+    Check(ApolloDuoRailSectionLineMaxX(920.0, 8.0) == 912.0,
+          "Open section lines span the wide content band");
+    Check(ApolloDuoRailRowPolishShouldApply(ApolloDuoModeOpen)
+              && ApolloDuoRailRowPolishShouldApply(ApolloDuoModeClosed),
+          "row polish runs on Open and Closed Duo");
+    Check(!ApolloDuoRailRowPolishShouldApply(ApolloDuoModePhone),
+          "row polish does not run on regular iPhone");
     Check(ApolloDuoCoverPillWidth == 80 && ApolloDuoCoverPillBottom == 120,
           "cover pill clearance is 80 trailing x 120 bottom");
     Check(ApolloDuoCoverChromeShouldApply(0, 1),
@@ -235,7 +272,10 @@ int main(void) {
     Check(ApolloDuoRailRowLeadDelta(18.0, 98.0) != 18.0 + ApolloDuoRailRowTrailingExtra(920.0),
           "trailing-extra must not be applied as a leading indent");
     Check(ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0) == 166.0,
-          "star sits after the drawn text, not at RowMaxContentWidth");
+          "legacy after-text cluster stays locked and unused at runtime");
+    Check(ApolloDuoRailRowStarColumnMaxX(920.0, 38.0)
+              != ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0),
+          "runtime far-right column is not the after-text cluster");
     Check(ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0) > 98.0 + 40.0 - 0.5,
           "star is not on the first letter");
     Check(ApolloDuoRailRowStarMinX(98.0, 40.0, 28.0) < (double)ApolloDuoRailRowMaxContentWidth,

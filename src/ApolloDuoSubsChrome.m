@@ -437,6 +437,20 @@ void ApolloDuoSubsChromeApply(UIViewController *controller) {
     ApolloDuoSubsChromeEnsureEdit(controller);
     ApolloDuoSubsChromeEnsureFAB(controller, chrome, coverLift);
 
+    if (controller.isViewLoaded) {
+        UITableView *table = nil;
+        if ([controller respondsToSelector:@selector(tableView)]) {
+            @try {
+                table = ((UITableView *(*)(id, SEL))objc_msgSend)(controller, @selector(tableView));
+            } @catch (__unused NSException *exception) {
+                table = nil;
+            }
+        }
+        if ([table isKindOfClass:[UITableView class]]) {
+            ApolloDuoRailPolishSubredditList(table);
+        }
+    }
+
     if (!objc_getAssociatedObject(controller, &kApolloDuoSubsChromeAppliedKey)) {
         objc_setAssociatedObject(controller, &kApolloDuoSubsChromeAppliedKey, @YES,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);

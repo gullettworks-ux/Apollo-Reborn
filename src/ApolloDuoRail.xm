@@ -1,4 +1,5 @@
 #import "ApolloDuoRail.h"
+#import "ApolloDuoRailLayout.h"
 #import "ApolloCommon.h"
 
 // Keep the rail attached to Apollo's tab controller across scene activate,
@@ -54,6 +55,8 @@
     if (ApolloDuoRailIsActive()) {
         ApolloDuoRailApplyListInsets((UIScrollView *)self);
         ApolloDuoRailPinSectionIndex((UITableView *)self);
+    } else if (ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) {
+        ApolloDuoRailPolishSubredditList((UITableView *)self);
     }
 }
 
@@ -70,6 +73,30 @@
     if (ApolloDuoRailIsActive()) {
         ApolloDuoRailApplyListInsets((UIScrollView *)self);
     }
+}
+
+%end
+
+%end
+
+%group ApolloDuoRailListRows
+
+%hook _TtC6Apollo23RedditListTableViewCell
+
+- (void)layoutSubviews {
+    %orig;
+    ApolloDuoRailTightenSubredditRow((UITableViewCell *)self);
+}
+
+%end
+
+%hook _TtC6Apollo24RedditListViewController
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+    %orig;
+    (void)tableView;
+    (void)indexPath;
+    ApolloDuoRailTightenSubredditRow(cell);
 }
 
 %end
@@ -120,6 +147,9 @@
     %init(ApolloDuoRailTabs);
     if (objc_getClass("ASTableView")) {
         %init(ApolloDuoRailTexture);
+    }
+    if (objc_getClass("_TtC6Apollo24RedditListViewController")) {
+        %init(ApolloDuoRailListRows);
     }
     [[NSNotificationCenter defaultCenter] addObserverForName:UISceneDidActivateNotification
                                                       object:nil
