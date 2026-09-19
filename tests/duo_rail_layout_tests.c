@@ -293,6 +293,25 @@ int main(void) {
           "row polish runs on Open and Closed Duo");
     Check(!ApolloDuoRailRowPolishShouldApply(ApolloDuoModePhone),
           "row polish does not run on regular iPhone");
+    Check(ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeOpen)
+              && ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeClosed),
+          "Duo Open and Closed install the custom Auto Layout star");
+    Check(!ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModePhone),
+          "regular iPhone keeps Apollo's native star");
+    Check(ApolloDuoRailRowShouldClaimStarButton(0),
+          "custom star constraints are installed once");
+    Check(!ApolloDuoRailRowShouldClaimStarButton(1),
+          "already-claimed custom star constraints are not re-toggled");
+    Check(ApolloDuoRailRowStarShouldShowFilled(1, 0),
+          "a name in FavoriteSubreddits shows a filled star");
+    Check(ApolloDuoRailRowStarShouldShowFilled(0, 1),
+          "a Favorites-section row shows a filled star");
+    Check(!ApolloDuoRailRowStarShouldShowFilled(0, 0),
+          "an unfavorited A–Z row shows an outline star");
+    Check(ApolloDuoRailRowStarButtonTrailing() == (double)ApolloDuoRailRowStarMinTrailing,
+          "custom star sits the live min-trailing inset left of A–Z / margins");
+    Check(ApolloDuoRailRowStarButtonSize == 28 && ApolloDuoRailRowStarButtonHit == 44,
+          "custom star glyph is 28pt inside a 44pt hit target");
     Check(ApolloDuoCoverPillWidth == 80 && ApolloDuoCoverPillBottom == 120,
           "cover pill clearance is 80 trailing x 120 bottom");
     Check(ApolloDuoCoverChromeShouldApply(0, 1),

@@ -41,6 +41,11 @@ enum {
     ApolloDuoRailRowTitleStarGap = 12,
     ApolloDuoRailRowStarRetryLimit = 3,
     ApolloDuoRailRowStarSearchFloor = 48,
+    /* Custom Duo star (not the native accessory). Size is the glyph;
+       hit slop is the button itself. Trailing is layoutMarginsGuide
+       minus this floor — immediately left of A–Z / trailing chrome. */
+    ApolloDuoRailRowStarButtonSize = 28,
+    ApolloDuoRailRowStarButtonHit = 44,
     ApolloDuoCoverPillWidth = 80,   /* cover system pill; Compact only */
     ApolloDuoCoverPillBottom = 120, /* lift FABs above the cover gear */
     /* Subs nav chrome (title / Edit / floating +). Insets only the
@@ -303,6 +308,25 @@ static inline double ApolloDuoRailSectionLineMaxX(double headerWidth,
 
 static inline int ApolloDuoRailRowPolishShouldApply(int mode) {
     return mode == ApolloDuoModeOpen || mode == ApolloDuoModeClosed;
+}
+
+// Duo owns a custom star's appearance/position. Phone keeps Apollo's
+// native accessory. Constraint install is one-shot (25f8a7b hang).
+static inline int ApolloDuoRailRowShouldInstallCustomStar(int mode) {
+    return ApolloDuoRailRowPolishShouldApply(mode);
+}
+
+static inline int ApolloDuoRailRowShouldClaimStarButton(int alreadyClaimed) {
+    return alreadyClaimed ? 0 : 1;
+}
+
+static inline int ApolloDuoRailRowStarShouldShowFilled(int inFavoritesList,
+                                                      int inFavoritesSection) {
+    return (inFavoritesList || inFavoritesSection) ? 1 : 0;
+}
+
+static inline double ApolloDuoRailRowStarButtonTrailing(void) {
+    return (double)ApolloDuoRailRowStarMinTrailing;
 }
 
 // Full table+cell layoutIfNeeded only on appear / mode / rotation —

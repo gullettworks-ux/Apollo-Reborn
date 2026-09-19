@@ -38,32 +38,29 @@ void ApolloDuoRailClearOpenContent(void);
 /// Favorite/sub rows get rail clearance only — no wide-row star cluster.
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 
-/// Duo-only: re-anchor one cell's native star in contentView
-/// coordinates after that cell has finished layout. No
-/// layoutIfNeeded (safe from layoutSubviews). No-op on Phone.
+/// Duo-only: hide Apollo's native star and bind the custom Auto
+/// Layout star (left of A–Z). No native frame writes. No-op on Phone.
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
 
-/// Re-anchor visible RedditList stars. forceLayout YES runs the
-/// table+cell layoutIfNeeded pass (appear / mode / rotation only)
-/// and schedules one bounded deferred pass so first Open uses the
-/// settled contentView width. forceLayout NO is scroll /
-/// layoutSubviews (frame nudge only; never parks on stale Closed
-/// width). Open↔Closed clears any cached Closed column.
+/// Hide the native accessory only (safe from layoutSubviews). Does
+/// not install or update Auto Layout.
+void ApolloDuoRailHideNativeStarInRow(UITableViewCell *cell);
+
+/// Bind custom stars on visible RedditList rows. forceLayout YES
+/// also schedules one bounded deferred bind after Open chrome
+/// settles. No native-frame re-anchor.
 void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout);
 
-/// Tighten every currently visible cell. No layoutIfNeeded. Used
-/// after the table's final layout and on every scroll tick.
+/// Bind the custom star on every currently visible cell.
 void ApolloDuoRailReanchorVisibleStars(UITableView *tableView);
 
-/// Coalesced next-turn ReanchorVisibleStars after table/VC layout
-/// so cells that did not receive layoutSubviews still get the column.
+/// Coalesced next-turn bind after table/VC layout.
 void ApolloDuoRailReanchorVisibleStarsAfterLayout(UITableView *tableView);
 
-/// Duo RedditList: re-anchor without forcing layout.
+/// Duo RedditList: bind custom stars without forcing layout.
 void ApolloDuoRailPolishSubredditList(UITableView *tableView);
 
-/// Clear leftover readable/center margins, claimed star constraints,
-/// and the hit proxy on reuse so a recycled row cannot keep a wrong column.
+/// Reset the custom star and restore the native control on reuse.
 void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell);
 
 /// One-shot readable/center margin reset. Not for layoutSubviews.

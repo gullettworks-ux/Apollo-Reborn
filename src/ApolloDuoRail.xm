@@ -87,7 +87,7 @@
 
 - (void)layoutSubviews {
     %orig;
-    ApolloDuoRailTightenSubredditRow((UITableViewCell *)self);
+    ApolloDuoRailHideNativeStarInRow((UITableViewCell *)self);
 }
 
 - (void)prepareForReuse {
@@ -133,9 +133,6 @@
     (void)indexPath;
     if (!ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) return;
     ApolloDuoRailPrepareSubredditRow(cell);
-    [cell setNeedsLayout];
-    [cell layoutIfNeeded];
-    [cell.contentView layoutIfNeeded];
     ApolloDuoRailTightenSubredditRow(cell);
 }
 

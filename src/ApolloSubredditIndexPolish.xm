@@ -1213,6 +1213,8 @@ static UIControl *ApolloSubredditIndexFindStarControlInView(UIView *view, UITabl
         UIView *candidate = stack.lastObject;
         [stack removeLastObject];
 
+        const char *candidateName = class_getName(candidate.class);
+        if (candidateName && strstr(candidateName, "DuoStarButton")) continue;
         if ([candidate isKindOfClass:[UIControl class]] && ![candidate isMemberOfClass:[ApolloSubredditStarHitProxy class]] && !candidate.hidden && candidate.alpha > 0.05) {
             CGRect frameInCell = CGRectZero;
             BOOL plausibleSize = ApolloSubredditIndexStarControlFrameIsPlausible((UIControl *)candidate, cell, &frameInCell);
@@ -1775,6 +1777,11 @@ static void ApolloSubredditIndexScheduleFavoritesRefresh(UITableView *tableView,
 
 static void ApolloSubredditIndexInstallStarProxyForCell(UITableViewCell *cell, UITableView *tableView) {
     if (!cell || !tableView) return;
+
+    if (ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoCurrentMode())) {
+        ApolloSubredditIndexRemoveStarProxyFromCell(cell);
+        return;
+    }
 
     if (tableView.editing || cell.editing) {
         // In edit mode Apollo's reorder grip lives in the same right-side area.
