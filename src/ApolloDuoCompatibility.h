@@ -54,15 +54,17 @@ static inline int ApolloDuoModeIsLeading(int mode) {
     return mode == ApolloDuoModeOpen;
 }
 
-// Expand when the window is letterboxed *or* still phone-narrow on a
-// Duo-wide canvas. Origin / scene assignment is the caller's job.
+// Grow a leftover phone column onto a *wider* Duo canvas. Height-only
+// gaps are keyboard / sheet insets, and a taller-but-narrower cover
+// (Spotlight, software keyboard) must never steal an already-wide
+// inner window. Origin / scene assignment is the caller's job.
 static inline int ApolloDuoNeedsCanvasFill(double windowWidth,
                                            double windowHeight,
                                            double canvasWidth,
                                            double canvasHeight) {
     if (canvasWidth <= 0.0 || canvasHeight <= 0.0) return 0;
-    if (ApolloDisplayIsLetterboxed(windowWidth, windowHeight,
-                                   canvasWidth, canvasHeight)) {
+    if (windowWidth <= 0.0 || windowHeight <= 0.0) return 1;
+    if ((canvasWidth - windowWidth) >= (double)ApolloDisplayLetterboxMinGap) {
         return 1;
     }
     return !ApolloDuoIsWideBounds(windowWidth, windowHeight)

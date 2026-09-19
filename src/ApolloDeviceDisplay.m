@@ -4,6 +4,7 @@
 
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <string.h>
 
 #import "ApolloCommon.h"
 
@@ -14,6 +15,62 @@ static Class ApolloThemeableWindowClass(void) {
         cls = objc_getClass("_TtC6Apollo15ThemeableWindow");
     });
     return cls;
+}
+
+static BOOL ApolloDeviceClassLooksLikeComposer(Class cls) {
+    const char *name = class_getName(cls);
+    if (!name || strncmp(name, "_TtC6Apollo", 11) != 0) return NO;
+    return strstr(name, "ComposeViewController") != NULL
+        || strstr(name, "ComposePostViewController") != NULL
+        || strstr(name, "WatcherComposerViewController") != NULL;
+}
+
+static BOOL ApolloDeviceClassLooksLikeKeyboardWindow(Class cls) {
+    const char *name = class_getName(cls);
+    return name && (strstr(name, "TextEffects")
+                    || strstr(name, "RemoteKeyboard")
+                    || strstr(name, "UIKeyboardWindow"));
+}
+
+static BOOL ApolloDeviceResponderIsTextInput(id responder) {
+    if (!responder) return NO;
+    if ([responder isKindOfClass:[UITextField class]]
+        || [responder isKindOfClass:[UITextView class]]
+        || [responder isKindOfClass:[UISearchBar class]]) {
+        return YES;
+    }
+    return [responder conformsToProtocol:@protocol(UIKeyInput)]
+        && [responder conformsToProtocol:@protocol(UITextInput)];
+}
+
+static BOOL ApolloDeviceTreeHasComposer(UIViewController *root) {
+    if (!root) return NO;
+    if (ApolloDeviceClassLooksLikeComposer(root.class)
+        && !ApolloIsSystemShareComposeController(root)) {
+        return YES;
+    }
+    if (root.presentedViewController) {
+        return ApolloDeviceTreeHasComposer(root.presentedViewController);
+    }
+    return NO;
+}
+
+BOOL ApolloDeviceShouldHoldCanvas(void) {
+    for (UIWindow *window in ApolloAllWindows()) {
+        if (![window isKindOfClass:[UIWindow class]] || window.hidden) continue;
+        if (ApolloDeviceClassLooksLikeKeyboardWindow(window.class)) {
+            return YES;
+        }
+        UIResponder *first = nil;
+        @try {
+            first = [window valueForKey:@"firstResponder"];
+        } @catch (__unused NSException *exception) {
+            first = nil;
+        }
+        if (ApolloDeviceResponderIsTextInput(first)) return YES;
+        if (ApolloDeviceTreeHasComposer(window.rootViewController)) return YES;
+    }
+    return NO;
 }
 
 UIWindow *ApolloDeviceAppWindow(void) {
@@ -174,9 +231,15 @@ void ApolloDeviceFillWindowToActiveCanvas(UIWindow *window) {
     if (filling) return;
     filling = YES;
 
+    // Composer / keyboard becoming key used to restamp scene geometry on
+    // every makeKeyWindow. A taller-narrower cover scene then looked
+    // "letterboxed" on height and stole the inner window (Spotlight
+    // sideways, or a composer that cannot take keystrokes).
+    BOOL hold = ApolloDeviceShouldHoldCanvas();
+
     UIWindowScene *scene = window.windowScene;
     UIWindowScene *preferred = ApolloDevicePreferredWindowScene();
-    if (preferred && preferred != scene) {
+    if (!hold && preferred && preferred != scene) {
         CGRect preferredCanvas = ApolloDeviceSceneCanvasRect(preferred);
         CGRect currentCanvas = ApolloDeviceSceneCanvasRect(scene);
         if (ApolloDuoNeedsCanvasFill(currentCanvas.size.width, currentCanvas.size.height,
@@ -188,13 +251,13 @@ void ApolloDeviceFillWindowToActiveCanvas(UIWindow *window) {
                       preferred, preferredCanvas.size.width, preferredCanvas.size.height);
         }
     }
-    if (!scene && preferred) {
+    if (!hold && !scene && preferred) {
         window.windowScene = preferred;
         scene = preferred;
     }
 
     CGRect canvas = ApolloDuoTargetCanvasForWindow(window);
-    if (ApolloDuoConnectedScreensLookDual()
+    if (!hold && ApolloDuoConnectedScreensLookDual()
         && ApolloDuoNeedsCanvasFill(window.bounds.size.width, window.bounds.size.height,
                                     canvas.size.width, canvas.size.height)) {
         UIWindowScene *match = ApolloDuoSceneMatchingCanvas(canvas);
@@ -205,35 +268,40 @@ void ApolloDeviceFillWindowToActiveCanvas(UIWindow *window) {
                       match, canvas.size.width, canvas.size.height);
         }
     }
-    if (scene) {
-        ApolloDeviceExpandSceneToScreen(scene);
-        if (CGRectIsEmpty(canvas)) {
-            canvas = ApolloDeviceSceneCanvasRect(scene);
+    CGRect frame = window.frame;
+    BOOL needsFill = scene
+        && !CGRectIsEmpty(canvas)
+        && ApolloDuoNeedsCanvasFill(frame.size.width, frame.size.height,
+                                    canvas.size.width, canvas.size.height);
+    if (!needsFill) {
+        filling = NO;
+        return;
+    }
+
+    ApolloDeviceExpandSceneToScreen(scene);
+    if (CGRectIsEmpty(canvas)) {
+        canvas = ApolloDeviceSceneCanvasRect(scene);
+    }
+    ApolloLog(@"[DeviceDisplay] Filling window %.0fx%.0f @ (%.0f,%.0f) → %.0fx%.0f wide=%d hold=%d",
+              frame.size.width, frame.size.height, frame.origin.x, frame.origin.y,
+              canvas.size.width, canvas.size.height,
+              ApolloDuoIsWideBounds(canvas.size.width, canvas.size.height),
+              hold ? 1 : 0);
+    window.frame = canvas;
+    UIView *root = window.rootViewController.view;
+    if (root) {
+        root.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        if (ApolloDuoNeedsCanvasFill(root.bounds.size.width, root.bounds.size.height,
+                                     window.bounds.size.width, window.bounds.size.height)
+            || fabs(root.frame.origin.x) >= 1.0
+            || fabs(root.frame.origin.y) >= 1.0) {
+            root.frame = window.bounds;
         }
-        if (!CGRectIsEmpty(canvas)) {
-            CGRect frame = window.frame;
-            if (ApolloDuoNeedsCanvasFill(frame.size.width, frame.size.height,
-                                         canvas.size.width, canvas.size.height)
-                || fabs(frame.origin.x - canvas.origin.x) >= 1.0
-                || fabs(frame.origin.y - canvas.origin.y) >= 1.0) {
-                ApolloLog(@"[DeviceDisplay] Filling window %.0fx%.0f @ (%.0f,%.0f) → %.0fx%.0f wide=%d",
-                          frame.size.width, frame.size.height, frame.origin.x, frame.origin.y,
-                          canvas.size.width, canvas.size.height,
-                          ApolloDuoIsWideBounds(canvas.size.width, canvas.size.height));
-                window.frame = canvas;
-                UIView *root = window.rootViewController.view;
-                if (root) {
-                    root.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                    if (ApolloDuoNeedsCanvasFill(root.bounds.size.width, root.bounds.size.height,
-                                                 window.bounds.size.width, window.bounds.size.height)
-                        || fabs(root.frame.origin.x) >= 1.0
-                        || fabs(root.frame.origin.y) >= 1.0) {
-                        root.frame = window.bounds;
-                    }
-                    [root setNeedsLayout];
-                    [root layoutIfNeeded];
-                }
-            }
+        [root setNeedsLayout];
+        // layoutIfNeeded resigns first responder when the composer just
+        // became key. Defer to the next turn if a text input is live.
+        if (!hold) {
+            [root layoutIfNeeded];
         }
     }
     filling = NO;

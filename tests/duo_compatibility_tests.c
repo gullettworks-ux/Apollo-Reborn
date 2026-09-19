@@ -51,6 +51,16 @@ int main(void) {
           "a phone window on a phone canvas is not Duo-fill");
     Check(!ApolloDuoNeedsCanvasFill(390.0, 844.0, 0.0, 0.0),
           "unknown canvas does not force a fill");
+    Check(!ApolloDuoNeedsCanvasFill(1133.0, 500.0, 1133.0, 744.0),
+          "a keyboard-shrunk height on a matching-width canvas does not refill");
+    Check(!ApolloDuoNeedsCanvasFill(390.0, 600.0, 390.0, 844.0),
+          "a phone keyboard height gap is not Duo-fill");
+    Check(!ApolloDuoNeedsCanvasFill(1133.0, 744.0, 400.0, 900.0),
+          "a taller-narrower cover / Spotlight canvas must not steal an Open window");
+    Check(!ApolloDuoNeedsCanvasFill(1133.0, 744.0, 430.0, 932.0),
+          "cover portrait vs inner landscape is not a leftover phone column");
+    Check(ApolloDuoNeedsCanvasFill(0.0, 0.0, 1133.0, 744.0),
+          "an empty window on a real canvas still fills");
 
     Check(ApolloDuoModeFromBounds(0, 390.0, 844.0) == ApolloDuoModePhone,
           "single phone portrait is Phone");

@@ -38,6 +38,9 @@ static void ApolloDeviceDisplayApplySoon(void) {
 
 - (void)makeKeyWindow {
     %orig;
+    // FillWindow is a no-op unless this is still a leftover phone
+    // column. Becoming key for the composer must not restamp geometry
+    // or move the window onto a cover / Spotlight scene.
     ApolloDeviceFillWindowToActiveCanvas((UIWindow *)self);
 }
 
