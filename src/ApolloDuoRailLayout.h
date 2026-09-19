@@ -32,9 +32,9 @@ enum {
        FAVORITES titles mid-pane. Portrait (stock RedditList) is the look. */
     ApolloDuoRailRowMaxContentWidth = 480,
     ApolloDuoRailRowStarGap = 28,
-    /* Legacy fixed 38pt column — leftover. Runtime stars are Apollo's
-       native accessory, parked by a table-level trailing reserve, not
-       a per-cell X. 8 is only a leftover floor. */
+    /* Legacy fixed 38pt column — leftover. Runtime stars are a
+       table-sibling overlay column (StarColumn*), not a per-cell X
+       and not a table layoutMargins reserve. 8 is only a leftover floor. */
     ApolloDuoRailRowStarTrailing = 38,
     ApolloDuoRailRowStarMinTrailing = 8,
     ApolloDuoRailSectionLineTrailing = 8,
@@ -47,9 +47,9 @@ enum {
     ApolloDuoRailRowStarButtonSize = 28,
     ApolloDuoRailRowStarButtonHit = 44,
     ApolloDuoRailRowStarIndexGap = 8,
-    /* Table-level trailing reserve (runtime). Matches the Subreddit
-       index polish A–Z clear (38pt). Index + gap, then the overlapping
-       floating nav pill if that pill sits on the trailing half. */
+    /* Leftover table-level trailing reserve. Runtime does not write
+       layoutMargins — that never moved accessoryButton and clipped
+       Favorites titles. Overlay column X is StarColumn* below. */
     ApolloDuoRailTableIndexFloor = 38,
     ApolloDuoCoverPillWidth = 80,   /* cover system pill; Compact only */
     ApolloDuoCoverPillBottom = 120, /* lift FABs above the cover gear */
@@ -315,15 +315,78 @@ static inline int ApolloDuoRailRowPolishShouldApply(int mode) {
 }
 
 // Abandoned. Per-cell ApolloDuoStarButton trailing collapsed on
-// reuse / Open↔Closed (contentAlreadyInset → 8pt floor, stars under
-// the A–Z / floating pill). Runtime restores the native accessory
-// and reserves trailing on the table instead.
+// reuse / Open↔Closed. Table layoutMargins also failed to move
+// accessoryButton (Favorites “Apple” stayed mid-pane). Runtime is
+// a table-sibling overlay column. Never install in-cell stars.
 static inline int ApolloDuoRailRowShouldInstallCustomStar(int mode) {
     (void)mode;
     return 0;
 }
 
-// Duo RedditList only. Phone keeps Apollo's stock table margins.
+// Duo RedditList overlay column. Phone keeps Apollo's native star.
+static inline int ApolloDuoRailStarColumnShouldApply(int mode) {
+    return ApolloDuoRailRowPolishShouldApply(mode);
+}
+
+// Leftmost trailing guide: live A–Z leading, or a trailing-half
+// floating pill that sits inland of the index.
+static inline double ApolloDuoRailStarColumnGuideLeading(double indexLeading,
+                                                        double pillLeading) {
+    int haveIndex = indexLeading > 0.5;
+    int havePill = pillLeading > 0.5;
+    if (haveIndex && havePill) {
+        return indexLeading < pillLeading ? indexLeading : pillLeading;
+    }
+    if (haveIndex) return indexLeading;
+    if (havePill) return pillLeading;
+    return 0.0;
+}
+
+// Overlay button.maxX in table space: guide − gap. 0 means “use
+// the width fallback” (index not laid out yet).
+static inline double ApolloDuoRailStarColumnMaxXFromGuide(double guideLeading,
+                                                         double gap) {
+    if (gap < 0.0) gap = 0.0;
+    if (guideLeading <= 0.5) return 0.0;
+    double maxX = guideLeading - gap;
+    return maxX > 0.0 ? maxX : 0.0;
+}
+
+// First-paint / missing-index fallback: table.maxX − index width − gap.
+static inline double ApolloDuoRailStarColumnFallbackMaxX(double tableWidth,
+                                                        double indexWidth,
+                                                        double gap) {
+    if (tableWidth <= 0.0) return 0.0;
+    if (indexWidth < 0.0) indexWidth = 0.0;
+    if (gap < 0.0) gap = 0.0;
+    double maxX = tableWidth - indexWidth - gap;
+    return maxX > 0.0 ? maxX : 0.0;
+}
+
+static inline double ApolloDuoRailStarColumnResolvedMaxX(double guideLeading,
+                                                        double tableWidth,
+                                                        double indexWidth,
+                                                        double gap) {
+    double fromGuide = ApolloDuoRailStarColumnMaxXFromGuide(guideLeading, gap);
+    if (fromGuide > 0.5) return fromGuide;
+    return ApolloDuoRailStarColumnFallbackMaxX(tableWidth, indexWidth, gap);
+}
+
+// Host strip origin so button.maxX == columnMaxX.
+static inline double ApolloDuoRailStarColumnHostMinX(double columnMaxX,
+                                                    double hostWidth) {
+    if (hostWidth < 0.0) hostWidth = 0.0;
+    double minX = columnMaxX - hostWidth;
+    return minX > 0.0 ? minX : 0.0;
+}
+
+static inline int ApolloDuoRailStarColumnNeedsMove(double haveX, double wantX) {
+    double gap = haveX - wantX;
+    if (gap < 0.0) gap = -gap;
+    return gap > 0.5;
+}
+
+// Leftover table-margin gate. Runtime uses StarColumnShouldApply.
 static inline int ApolloDuoRailTableShouldReserveTrailing(int mode) {
     return ApolloDuoRailRowPolishShouldApply(mode);
 }
@@ -388,8 +451,8 @@ static inline int ApolloDuoRailTableReserveNeedsUpdate(double have, double want)
     return gap > 0.5;
 }
 
-// Overlay fallback only: native accessory still sits past the
-// reserved band (margins did not move accessoryButton).
+// Leftover margin-failure detector. Runtime always installs the
+// overlay column on Duo — layoutMargins never moved accessoryButton.
 static inline int ApolloDuoRailNativeStarNeedsOverlay(double starMaxX,
                                                      double bandMaxX) {
     if (bandMaxX <= 0.5) return 0;

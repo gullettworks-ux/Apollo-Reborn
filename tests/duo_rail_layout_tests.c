@@ -297,11 +297,59 @@ int main(void) {
               && !ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeClosed)
               && !ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModePhone),
           "per-cell custom stars are abandoned on every mode");
+    Check(ApolloDuoRailStarColumnShouldApply(ApolloDuoModeOpen)
+              && ApolloDuoRailStarColumnShouldApply(ApolloDuoModeClosed),
+          "Duo Open and Closed install the overlay star column");
+    Check(!ApolloDuoRailStarColumnShouldApply(ApolloDuoModePhone),
+          "regular iPhone keeps Apollo's native star; no overlay column");
+    Check(ApolloDuoRailStarColumnGuideLeading(400.0, 420.0) == 400.0,
+          "overlay guide is the leftmost of A–Z and a trailing pill");
+    Check(ApolloDuoRailStarColumnGuideLeading(400.0, 0.0) == 400.0,
+          "overlay guide is the live A–Z leading when no pill overlaps");
+    Check(ApolloDuoRailStarColumnGuideLeading(0.0, 420.0) == 420.0,
+          "overlay guide is the trailing-half pill when the index is missing");
+    Check(ApolloDuoRailStarColumnGuideLeading(0.0, 0.0) == 0.0,
+          "no A–Z and no pill means use the width fallback");
+    Check(ApolloDuoRailStarColumnMaxXFromGuide(400.0, 8.0) == 392.0,
+          "overlay button.maxX is A–Z leading minus the gap");
+    Check(ApolloDuoRailStarColumnMaxXFromGuide(0.0, 8.0) == 0.0,
+          "a missing guide does not invent a column X");
+    Check(ApolloDuoRailStarColumnFallbackMaxX(1013.0, 16.0, 8.0) == 989.0,
+          "first-paint fallback is table.width − index − gap");
+    Check(ApolloDuoRailStarColumnFallbackMaxX(400.0, 16.0, 8.0) == 376.0,
+          "Closed first-paint fallback sits left of a 16pt A–Z");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(400.0, 1013.0, 16.0, 8.0) == 392.0,
+          "a live A–Z guide wins over the width fallback");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(0.0, 1013.0, 16.0, 8.0) == 989.0,
+          "missing index uses the first-paint fallback");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(997.0, 1013.0, 16.0, 8.0) == 989.0,
+          "overlay maxX is immediately left of a trailing A–Z");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(933.0, 1013.0, 16.0, 8.0) == 925.0,
+          "a trailing-half nav pill pulls the column inland of A–Z");
+    Check(ApolloDuoRailStarColumnHostMinX(392.0, 44.0) == 348.0,
+          "host minX parks a 44pt hit target so button.maxX hits the guide");
+    Check(ApolloDuoRailStarColumnHostMinX(925.0, 44.0) == 881.0,
+          "host minX for a pill-cleared column stays on the trailing half");
+    Check(ApolloDuoRailStarColumnHostMinX(20.0, 44.0) == 0.0,
+          "a too-narrow band clamps the host to 0, not a negative X");
+    Check(ApolloDuoRailStarColumnNeedsMove(348.0, 400.0),
+          "a mid-pane leftover host must move to the overlay column");
+    Check(!ApolloDuoRailStarColumnNeedsMove(348.0, 348.0),
+          "an already-parked overlay host is a no-op");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(997.0, 1013.0, 16.0, 8.0)
+              < 997.0,
+          "overlay stars stay left of the A–Z leading edge");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(933.0, 1013.0, 16.0, 8.0)
+              < 933.0,
+          "overlay stars stay left of a floating right nav pill");
+    Check(ApolloDuoRailStarColumnResolvedMaxX(997.0, 1013.0, 16.0, 8.0)
+              > 1013.0 * 0.5,
+          "overlay column is not a mid-pane X");
     Check(ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModeOpen)
               && ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModeClosed),
-          "Duo Open and Closed reserve trailing on the table");
+          "leftover table-reserve gate still matches Duo modes");
     Check(!ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModePhone),
-          "regular iPhone does not apply a Duo table trailing reserve");
+          "leftover table-reserve gate stays off on regular iPhone");
     Check(ApolloDuoRailTableIndexReserve(16.0, 0.0, 8.0, 38.0) == 38.0,
           "a 16pt A–Z strip still uses the 38pt polish floor");
     Check(ApolloDuoRailTableIndexReserve(56.0, 0.0, 8.0, 38.0) == 64.0,
@@ -334,9 +382,9 @@ int main(void) {
     Check(ApolloDuoRailTableBandMaxX(1013.0, 38.0) == 975.0,
           "content + native accessory end immediately left of the reserve");
     Check(ApolloDuoRailNativeStarNeedsOverlay(1010.0, 975.0),
-          "a native star still past the reserved band needs the overlay fallback");
+          "leftover detector: a mid-pane native star sat past the reserved band");
     Check(!ApolloDuoRailNativeStarNeedsOverlay(975.0, 975.0),
-          "a native star on the reserved band does not need the overlay");
+          "leftover detector: a native star on the reserved band looked parked");
     Check(ApolloDuoRailTableReserveNeedsUpdate(8.0, 38.0),
           "raising a collapsed 8pt floor to the A–Z reserve is a write");
     Check(!ApolloDuoRailTableReserveNeedsUpdate(38.0, 38.0),

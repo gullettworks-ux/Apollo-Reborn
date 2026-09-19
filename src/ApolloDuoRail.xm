@@ -90,6 +90,11 @@
     %orig;
 }
 
+- (void)layoutSubviews {
+    %orig;
+    ApolloDuoRailHideNativeStarInRow((UITableViewCell *)self);
+}
+
 %end
 
 %hook _TtC6Apollo24RedditListViewController
@@ -129,17 +134,18 @@
     if (cell && ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) {
         ApolloDuoRailPrepareSubredditRow(cell);
         ApolloDuoRailTightenSubredditRow(cell);
+        ApolloDuoRailRefreshVisibleStars(tableView);
     }
     return cell;
 }
 
 - (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
     %orig;
-    (void)tableView;
     (void)indexPath;
     if (!cell || !ApolloDuoRailRowPolishShouldApply(ApolloDuoCurrentMode())) return;
     ApolloDuoRailPrepareSubredditRow(cell);
     ApolloDuoRailTightenSubredditRow(cell);
+    ApolloDuoRailRefreshVisibleStars(tableView);
 }
 
 %end

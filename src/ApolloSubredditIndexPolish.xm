@@ -1778,6 +1778,15 @@ static void ApolloSubredditIndexScheduleFavoritesRefresh(UITableView *tableView,
 static void ApolloSubredditIndexInstallStarProxyForCell(UITableViewCell *cell, UITableView *tableView) {
     if (!cell || !tableView) return;
 
+    // Duo paints stars in a table-sibling overlay column. Mid-pane
+    // hit proxies would steal taps from that column and keep the
+    // native accessory visible.
+    if (ApolloDuoRailStarColumnShouldApply(ApolloDuoCurrentMode())) {
+        ApolloSubredditIndexRemoveStarProxyFromCell(cell);
+        ApolloDuoRailHideNativeStarInRow(cell);
+        return;
+    }
+
     if (tableView.editing || cell.editing) {
         // In edit mode Apollo's reorder grip lives in the same right-side area.
         // Let the native reorder gesture win instead of covering it with our

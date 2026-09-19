@@ -20,16 +20,15 @@
 // Selected item uses the theme accent (blue on stock) as a rounded
 // pill. FeedSplit tiling stays off.
 //
-// RedditList stars: Apollo's native accessoryButton is the
-// appearance and the favorite action. A table-level trailing
-// reserve (layoutMargins / directionalLayoutMargins) keeps every
-// row's content + accessory in a band that ends immediately left
-// of the A–Z index, and clear of a floating nav pill that overlaps
-// the list. Applied once on the table; cells inherit. Per-cell
-// ApolloDuoStarButton / contentView.trailing pins are abandoned
-// (reuse collapsed them under the pill). Fallback: one overlay
-// column as a sibling of the table, synced to visibleCells — never
-// constraints inside recycled cells. Closed has no side rail.
+// RedditList stars: native accessoryButton stays in-tree as the
+// favorite action/state, but is hidden. A table-sibling overlay
+// column (same host as A–Z) paints one star per visible row at
+// X = A–Z leading − gap, or a tighter trailing-half nav pill.
+// Synced to visibleCells on appear / scroll / willDisplay /
+// Open↔Closed. Per-cell contentView pins and table layoutMargins
+// are abandoned — neither moved accessoryButton (Favorites
+// “Apple” stayed mid-pane; large trailing margins clipped titles).
+// Closed has no side rail.
 //
 // Mode keys off UIWindow.bounds (never UIScreen.mainScreen). First
 // show defaults to Subs: stock popToRoot onto RedditList. Navigation
@@ -69,9 +68,6 @@ static char kApolloDuoRailRowStarRetryScheduledKey;
 static char kApolloDuoRailRowLastModeKey;
 static char kApolloDuoRailRowLastContentWidthKey;
 static char kApolloDuoRailNativeStarHiddenKey;
-static char kApolloDuoRailSavedTableMarginRightKey;
-static char kApolloDuoRailSavedTableDirTrailingKey;
-static char kApolloDuoRailLastTableReserveKey;
 static char kApolloDuoRailStarColumnKey;
 static BOOL sApolloDuoRailDeferredScheduled = NO;
 static BOOL sApolloDuoRailAfterLayoutScheduled = NO;
@@ -803,8 +799,6 @@ static UIControl *ApolloDuoRailNativeStarControl(UITableViewCell *cell) {
     return nil;
 }
 
-// Overlay fallback only. Native stays visible when table margins
-// successfully park accessoryButton left of A–Z.
 static void ApolloDuoRailHideNativeStar(UIControl *native) {
     if (!native) return;
     if (!objc_getAssociatedObject(native, &kApolloDuoRailNativeStarHiddenKey)) {
@@ -875,7 +869,9 @@ static void ApolloDuoRailResetStaleRowMargins(UITableViewCell *cell) {
                                                 (double)contentWidth,
                                                 lastModeValue.intValue,
                                                 mode);
-    if (objc_getAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey) && !revisit) return;
+    BOOL leftoverTrailing = margins.right + 0.5 >= (CGFloat)ApolloDuoRailTableIndexFloor;
+    if (objc_getAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey) && !revisit
+        && !leftoverTrailing) return;
     CGFloat windowWidth = 0.0;
     CGFloat windowHeight = 0.0;
     ApolloDuoRailWindowSizeForView(cell, &windowWidth, &windowHeight);
@@ -887,7 +883,8 @@ static void ApolloDuoRailResetStaleRowMargins(UITableViewCell *cell) {
     if (!ApolloDuoRailRowMarginsNeedReset((double)contentWidth,
                                           (double)cellWidth,
                                           (double)margins.left,
-                                          (double)ApolloDuoRailRowStockLead)) {
+                                          (double)ApolloDuoRailRowStockLead)
+        && !leftoverTrailing) {
         if (!stale) {
             objc_setAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey, @YES,
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -896,13 +893,12 @@ static void ApolloDuoRailResetStaleRowMargins(UITableViewCell *cell) {
     }
     cell.preservesSuperviewLayoutMargins = YES;
     content.preservesSuperviewLayoutMargins = YES;
-    UITableView *table = ApolloDuoRailTableForCell(cell);
-    NSNumber *reserveValue = table ? objc_getAssociatedObject(table, &kApolloDuoRailLastTableReserveKey) : nil;
-    CGFloat trailing = reserveValue ? reserveValue.doubleValue : (CGFloat)ApolloDuoRailTableIndexFloor;
+    // Always restore stock trailing. Leftover table-reserve writes
+    // (38pt+) squeezed titles; accessoryButton ignored those margins.
     UIEdgeInsets stock = UIEdgeInsetsMake(margins.top,
                                           (CGFloat)ApolloDuoRailRowStockLead,
                                           margins.bottom,
-                                          trailing);
+                                          (CGFloat)ApolloDuoRailRowStockLead);
     if (fabs(cell.layoutMargins.left - stock.left) > 0.5
         || fabs(cell.layoutMargins.right - stock.right) > 0.5) {
         cell.layoutMargins = stock;
@@ -911,6 +907,10 @@ static void ApolloDuoRailResetStaleRowMargins(UITableViewCell *cell) {
         || fabs(margins.right - stock.right) > 0.5) {
         content.layoutMargins = stock;
     }
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowLastModeKey, @(mode),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowLastContentWidthKey, @(contentWidth),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey, @YES,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
@@ -960,28 +960,24 @@ void ApolloDuoRailPrepareSubredditRow(UITableViewCell *cell) {
     ApolloDuoRailResetStaleRowMargins(cell);
 }
 
-static void ApolloDuoRailInheritTableTrailing(UITableViewCell *cell, CGFloat reserve) {
-    if (!cell || reserve < 0.5) return;
-    cell.preservesSuperviewLayoutMargins = YES;
-    if (cell.contentView) cell.contentView.preservesSuperviewLayoutMargins = YES;
-    UIEdgeInsets margins = cell.layoutMargins;
-    if (margins.right + 0.5 < reserve) {
-        margins.right = reserve;
-        cell.layoutMargins = margins;
-    }
-    if (cell.contentView) {
-        UIEdgeInsets content = cell.contentView.layoutMargins;
-        if (content.right + 0.5 < reserve) {
-            content.right = reserve;
-            cell.contentView.layoutMargins = content;
-        }
-    }
+void ApolloDuoRailHideNativeStarInRow(UITableViewCell *cell) {
+    if (!cell) return;
+    if (!ApolloDuoRailStarColumnShouldApply(ApolloDuoRailCurrentMode())) return;
+    if (cell.editing) return;
+    const char *name = class_getName(cell.class);
+    if (name && strstr(name, "ApolloSubtitleTableViewCell")) return;
+    ApolloDuoRailHideNativeStar(ApolloDuoRailNativeStarControl(cell));
+    ApolloDuoRailStripLeftoverCustomStar(cell);
 }
 
 void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell) {
     if (!cell) return;
     ApolloDuoRailStripLeftoverCustomStar(cell);
-    ApolloDuoRailRestoreNativeStar(ApolloDuoRailNativeStarControl(cell));
+    if (ApolloDuoRailStarColumnShouldApply(ApolloDuoRailCurrentMode())) {
+        ApolloDuoRailHideNativeStar(ApolloDuoRailNativeStarControl(cell));
+    } else {
+        ApolloDuoRailRestoreNativeStar(ApolloDuoRailNativeStarControl(cell));
+    }
     ApolloDuoRailClearRowColumnCache(cell);
     ApolloDuoRailReleaseLeadingView(cell);
 }
@@ -996,17 +992,14 @@ void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell) {
         return;
     }
     UITableView *table = ApolloDuoRailTableForCell(cell);
-    NSNumber *reserveValue = table ? objc_getAssociatedObject(table, &kApolloDuoRailLastTableReserveKey) : nil;
-    CGFloat reserve = reserveValue ? reserveValue.doubleValue : 0.0;
-    UIView *column = table ? objc_getAssociatedObject(table, &kApolloDuoRailStarColumnKey) : nil;
-    BOOL overlayActive = column && column.superview && !column.hidden;
-    if (!overlayActive) {
-        ApolloDuoRailRestoreNativeStar(ApolloDuoRailNativeStarControl(cell));
-    }
     if (table && table.cellLayoutMarginsFollowReadableWidth) {
         table.cellLayoutMarginsFollowReadableWidth = NO;
     }
-    ApolloDuoRailInheritTableTrailing(cell, reserve);
+    if (!ApolloDuoRailStarColumnShouldApply(ApolloDuoRailCurrentMode()) || cell.editing) {
+        ApolloDuoRailRestoreNativeStar(ApolloDuoRailNativeStarControl(cell));
+        return;
+    }
+    ApolloDuoRailHideNativeStar(ApolloDuoRailNativeStarControl(cell));
 }
 
 static BOOL ApolloDuoRailTableLooksLikeRedditList(UITableView *tableView) {
@@ -1036,16 +1029,69 @@ static BOOL ApolloDuoRailTableLooksLikeRedditList(UITableView *tableView) {
 
 @interface ApolloDuoStarColumnButton : UIButton
 @property (nonatomic, weak) UIControl *nativeControl;
+@property (nonatomic, copy) NSString *subredditName;
+@property (nonatomic, copy) NSIndexPath *indexPath;
 @end
 
 @implementation ApolloDuoStarColumnButton
 - (void)apollo_duoStarColumnTapped {
     UIControl *native = self.nativeControl;
     if (!native) return;
-    ApolloLog(@"[ApolloDuoStar] overlay tap native=%@", NSStringFromClass(native.class));
+    ApolloLog(@"[ApolloDuoStar] overlay tap name=%@ native=%@",
+              self.subredditName ?: @"(unknown)",
+              NSStringFromClass(native.class));
     [native sendActionsForControlEvents:UIControlEventTouchUpInside];
 }
 @end
+
+static NSString *ApolloDuoRailCellTitle(UITableViewCell *cell) {
+    if (!cell) return nil;
+    if (cell.textLabel.text.length > 0) return cell.textLabel.text;
+    NSMutableArray<UIView *> *stack = [NSMutableArray array];
+    if (cell.contentView) [stack addObject:cell.contentView];
+    NSInteger inspected = 0;
+    while (stack.count > 0 && inspected++ < 24) {
+        UIView *candidate = stack.lastObject;
+        [stack removeLastObject];
+        if ([candidate isKindOfClass:[UILabel class]]) {
+            UILabel *label = (UILabel *)candidate;
+            if (label.text.length > 0) return label.text;
+        }
+        for (UIView *subview in candidate.subviews) {
+            [stack addObject:subview];
+        }
+    }
+    return nil;
+}
+
+static BOOL ApolloDuoRailNameIsFavorite(NSString *name) {
+    if (name.length == 0) return NO;
+    NSArray *favorites = [[NSUserDefaults standardUserDefaults] stringArrayForKey:@"FavoriteSubreddits"];
+    if (![favorites isKindOfClass:[NSArray class]]) return NO;
+    for (id value in favorites) {
+        if (![value isKindOfClass:[NSString class]]) continue;
+        if ([(NSString *)value caseInsensitiveCompare:name] == NSOrderedSame) return YES;
+    }
+    return NO;
+}
+
+static BOOL ApolloDuoRailCellLooksFavorited(UITableViewCell *cell, UIControl *native, NSString *name) {
+    if (ApolloDuoRailNameIsFavorite(name)) return YES;
+    if ([native isKindOfClass:[UIButton class]] && ((UIButton *)native).selected) return YES;
+    UITableView *table = ApolloDuoRailTableForCell(cell);
+    NSIndexPath *path = table ? [table indexPathForCell:cell] : nil;
+    if (path && [table numberOfSections] > 0) {
+        NSArray *titles = nil;
+        if ([table.dataSource respondsToSelector:@selector(sectionIndexTitlesForTableView:)]) {
+            titles = [table.dataSource sectionIndexTitlesForTableView:table];
+        }
+        if (titles.count > 0 && path.section < (NSInteger)titles.count) {
+            NSString *title = titles[path.section];
+            if ([title isEqualToString:@"★"] || [title isEqualToString:@"*"]) return YES;
+        }
+    }
+    return NO;
+}
 
 static UIView *ApolloDuoRailIndexOverlayView(UITableView *tableView) {
     UIView *container = tableView.superview;
@@ -1130,36 +1176,28 @@ static CGFloat ApolloDuoRailMeasurePillOverlap(UITableView *tableView) {
     return overlap;
 }
 
+static void ApolloDuoRailRemoveStarColumn(UITableView *tableView);
+
+static void ApolloDuoRailStripLeftoverTableReserve(UITableView *tableView) {
+    if (!tableView) return;
+    CGFloat stock = (CGFloat)ApolloDuoRailRowStockLead;
+    CGFloat floor = (CGFloat)ApolloDuoRailTableIndexFloor;
+    UIEdgeInsets margins = tableView.layoutMargins;
+    if (margins.right + 0.5 >= floor) {
+        margins.right = stock;
+        tableView.layoutMargins = margins;
+    }
+    NSDirectionalEdgeInsets dir = tableView.directionalLayoutMargins;
+    if (dir.trailing + 0.5 >= floor) {
+        dir.trailing = stock;
+        tableView.directionalLayoutMargins = dir;
+    }
+}
+
 static void ApolloDuoRailRestoreTableTrailing(UITableView *tableView) {
     if (!tableView) return;
-    NSNumber *savedRight = objc_getAssociatedObject(tableView, &kApolloDuoRailSavedTableMarginRightKey);
-    NSNumber *savedDir = objc_getAssociatedObject(tableView, &kApolloDuoRailSavedTableDirTrailingKey);
-    if (savedRight) {
-        UIEdgeInsets margins = tableView.layoutMargins;
-        if (ApolloDuoRailTableReserveNeedsUpdate((double)margins.right, savedRight.doubleValue)) {
-            margins.right = savedRight.doubleValue;
-            tableView.layoutMargins = margins;
-        }
-        objc_setAssociatedObject(tableView, &kApolloDuoRailSavedTableMarginRightKey, nil,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    if (savedDir) {
-        NSDirectionalEdgeInsets dir = tableView.directionalLayoutMargins;
-        if (ApolloDuoRailTableReserveNeedsUpdate((double)dir.trailing, savedDir.doubleValue)) {
-            dir.trailing = savedDir.doubleValue;
-            tableView.directionalLayoutMargins = dir;
-        }
-        objc_setAssociatedObject(tableView, &kApolloDuoRailSavedTableDirTrailingKey, nil,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    objc_setAssociatedObject(tableView, &kApolloDuoRailLastTableReserveKey, nil,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    UIView *column = objc_getAssociatedObject(tableView, &kApolloDuoRailStarColumnKey);
-    if (column) {
-        [column removeFromSuperview];
-        objc_setAssociatedObject(tableView, &kApolloDuoRailStarColumnKey, nil,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    ApolloDuoRailStripLeftoverTableReserve(tableView);
+    ApolloDuoRailRemoveStarColumn(tableView);
 }
 
 static ApolloDuoStarColumnView *ApolloDuoRailStarColumn(UITableView *tableView, BOOL create) {
@@ -1188,26 +1226,33 @@ static void ApolloDuoRailRemoveStarColumn(UITableView *tableView) {
     }
 }
 
-static void ApolloDuoRailSyncStarColumn(UITableView *tableView, CGFloat reserve) {
-    if (!tableView || tableView.editing || reserve < 0.5) {
-        ApolloDuoRailRemoveStarColumn(tableView);
+static void ApolloDuoRailSyncStarColumn(UITableView *tableView) {
+    if (!tableView) return;
+    int mode = ApolloDuoRailCurrentMode();
+    if (!ApolloDuoRailStarColumnShouldApply(mode)
+        || tableView.editing
+        || !ApolloDuoRailTableLooksLikeRedditList(tableView)) {
+        ApolloDuoRailRestoreTableTrailing(tableView);
         return;
     }
+    ApolloDuoRailStripLeftoverTableReserve(tableView);
+
     CGFloat tableWidth = CGRectGetWidth(tableView.bounds);
-    CGFloat bandMaxX = (CGFloat)ApolloDuoRailTableBandMaxX((double)tableWidth, (double)reserve);
-    BOOL needsOverlay = NO;
-    for (UITableViewCell *cell in tableView.visibleCells) {
-        const char *name = class_getName(cell.class);
-        if (name && strstr(name, "ApolloSubtitleTableViewCell")) continue;
-        UIControl *native = ApolloDuoRailNativeStarControl(cell);
-        if (!native) continue;
-        CGRect inTable = [tableView convertRect:native.bounds fromView:native];
-        if (ApolloDuoRailNativeStarNeedsOverlay((double)CGRectGetMaxX(inTable), (double)bandMaxX)) {
-            needsOverlay = YES;
-            break;
-        }
+    CGFloat indexWidth = 0.0;
+    CGFloat indexLeading = 0.0;
+    ApolloDuoRailMeasureIndex(tableView, &indexWidth, &indexLeading);
+    CGFloat pillLeading = 0.0;
+    CGFloat pillOverlap = ApolloDuoRailMeasurePillOverlap(tableView);
+    if (pillOverlap > 0.5) {
+        pillLeading = tableWidth - pillOverlap;
     }
-    if (!needsOverlay) {
+    CGFloat guide = (CGFloat)ApolloDuoRailStarColumnGuideLeading((double)indexLeading,
+                                                                (double)pillLeading);
+    CGFloat columnMaxX = (CGFloat)ApolloDuoRailStarColumnResolvedMaxX((double)guide,
+                                                                     (double)tableWidth,
+                                                                     (double)indexWidth,
+                                                                     (double)ApolloDuoRailRowStarIndexGap);
+    if (columnMaxX < 0.5) {
         ApolloDuoRailRemoveStarColumn(tableView);
         return;
     }
@@ -1215,40 +1260,67 @@ static void ApolloDuoRailSyncStarColumn(UITableView *tableView, CGFloat reserve)
     ApolloDuoStarColumnView *column = ApolloDuoRailStarColumn(tableView, YES);
     if (!column) return;
     UIView *container = tableView.superview;
-    if (column.superview != container && container) {
+    if (!container) return;
+    if (column.superview != container) {
         [column removeFromSuperview];
         [container addSubview:column];
     }
     CGRect tableFrame = [container convertRect:tableView.bounds fromView:tableView];
     CGFloat hit = (CGFloat)ApolloDuoRailRowStarButtonHit;
-    CGFloat x = CGRectGetMinX(tableFrame) + bandMaxX - hit;
-    if (x < CGRectGetMinX(tableFrame)) x = CGRectGetMinX(tableFrame);
-    CGRect want = CGRectMake(x, CGRectGetMinY(tableFrame), hit, CGRectGetHeight(tableFrame));
-    if (ApolloDuoSubsChromeShouldNudgeFrame(column.frame.origin.x, column.frame.origin.y,
-                                           want.origin.x, want.origin.y)
+    CGFloat hostMinX = (CGFloat)ApolloDuoRailStarColumnHostMinX((double)columnMaxX, (double)hit);
+    CGRect want = CGRectMake(CGRectGetMinX(tableFrame) + hostMinX,
+                             CGRectGetMinY(tableFrame),
+                             hit,
+                             CGRectGetHeight(tableFrame));
+    if (ApolloDuoRailStarColumnNeedsMove((double)column.frame.origin.x, (double)want.origin.x)
+        || ApolloDuoRailStarColumnNeedsMove((double)column.frame.origin.y, (double)want.origin.y)
         || ApolloDuoRailTableReserveNeedsUpdate((double)column.frame.size.width, (double)want.size.width)
         || ApolloDuoRailTableReserveNeedsUpdate((double)column.frame.size.height, (double)want.size.height)) {
         column.frame = want;
+        ApolloLog(@"[ApolloDuoStar] overlay column x=%.1f maxX=%.1f guide=%.1f indexLead=%.1f pillLead=%.1f",
+                  want.origin.x, columnMaxX, guide, indexLeading, pillLeading);
     }
-    [container bringSubviewToFront:column];
+    UIView *indexOverlay = ApolloDuoRailIndexOverlayView(tableView);
+    if (indexOverlay && indexOverlay.superview == container) {
+        [container insertSubview:column belowSubview:indexOverlay];
+    } else {
+        [container bringSubviewToFront:column];
+    }
 
-    NSArray<UIView *> *old = [column.subviews copy];
-    NSInteger buttonIndex = 0;
+    NSMutableArray<ApolloDuoStarColumnButton *> *pool = [NSMutableArray array];
+    for (UIView *subview in [column.subviews copy]) {
+        if ([subview isKindOfClass:[ApolloDuoStarColumnButton class]]) {
+            [pool addObject:(ApolloDuoStarColumnButton *)subview];
+        } else {
+            [subview removeFromSuperview];
+        }
+    }
     UIImageSymbolConfiguration *config =
         [UIImageSymbolConfiguration configurationWithPointSize:17.0
                                                         weight:UIImageSymbolWeightRegular];
     UIImage *outline = [UIImage systemImageNamed:@"star" withConfiguration:config];
-    UIImage *filled = [UIImage systemImageNamed:@"star.fill" withConfiguration:config];
+    UIImage *filledImage = [UIImage systemImageNamed:@"star.fill" withConfiguration:config];
+    NSInteger used = 0;
     for (UITableViewCell *cell in tableView.visibleCells) {
-        const char *name = class_getName(cell.class);
-        if (name && strstr(name, "ApolloSubtitleTableViewCell")) continue;
+        const char *cls = class_getName(cell.class);
+        if (cls && strstr(cls, "ApolloSubtitleTableViewCell")) continue;
         UIControl *native = ApolloDuoRailNativeStarControl(cell);
         if (!native) continue;
         ApolloDuoRailHideNativeStar(native);
+        NSIndexPath *path = [tableView indexPathForCell:cell];
+        NSString *name = ApolloDuoRailCellTitle(cell);
         ApolloDuoStarColumnButton *button = nil;
-        if (buttonIndex < (NSInteger)old.count
-            && [old[buttonIndex] isKindOfClass:[ApolloDuoStarColumnButton class]]) {
-            button = (ApolloDuoStarColumnButton *)old[buttonIndex];
+        for (NSInteger i = 0; i < (NSInteger)pool.count; i++) {
+            ApolloDuoStarColumnButton *candidate = pool[i];
+            if (path && [candidate.indexPath isEqual:path]) {
+                button = candidate;
+                [pool removeObjectAtIndex:i];
+                break;
+            }
+        }
+        if (!button && pool.count > 0) {
+            button = pool.firstObject;
+            [pool removeObjectAtIndex:0];
         }
         if (!button) {
             button = [ApolloDuoStarColumnButton buttonWithType:UIButtonTypeSystem];
@@ -1259,83 +1331,47 @@ static void ApolloDuoRailSyncStarColumn(UITableView *tableView, CGFloat reserve)
              forControlEvents:UIControlEventTouchUpInside];
             [column addSubview:button];
         }
-        BOOL selected = [native isKindOfClass:[UIButton class]] && ((UIButton *)native).selected;
-        [button setImage:selected ? filled : outline forState:UIControlStateNormal];
         button.nativeControl = native;
+        button.subredditName = name;
+        button.indexPath = path;
+        BOOL filled = ApolloDuoRailCellLooksFavorited(cell, native, name);
+        [button setImage:filled ? filledImage : outline forState:UIControlStateNormal];
+        button.accessibilityLabel = filled ? @"Unfavorite" : @"Favorite";
         CGRect cellInColumn = [column convertRect:cell.bounds fromView:cell];
         CGFloat midY = CGRectGetMidY(cellInColumn);
-        button.frame = CGRectMake(0.0, midY - hit * 0.5, hit, hit);
+        CGRect buttonFrame = CGRectMake(0.0, midY - hit * 0.5, hit, hit);
+        if (ApolloDuoRailStarColumnNeedsMove((double)button.frame.origin.y, (double)buttonFrame.origin.y)
+            || ApolloDuoRailTableReserveNeedsUpdate((double)button.frame.size.height,
+                                                    (double)buttonFrame.size.height)) {
+            button.frame = buttonFrame;
+        } else if (CGRectGetWidth(button.frame) < 1.0) {
+            button.frame = buttonFrame;
+        }
         button.hidden = NO;
-        buttonIndex += 1;
+        used += 1;
     }
-    for (NSInteger i = buttonIndex; i < (NSInteger)old.count; i++) {
-        [old[i] removeFromSuperview];
+    for (ApolloDuoStarColumnButton *leftover in pool) {
+        leftover.nativeControl = nil;
+        leftover.subredditName = nil;
+        leftover.indexPath = nil;
+        [leftover removeFromSuperview];
+    }
+    if (used == 0) {
+        ApolloLog(@"[ApolloDuoStar] overlay column x=%.1f (no starred rows yet)",
+                  CGRectGetMaxX(want));
     }
 }
 
-static void ApolloDuoRailApplyTableTrailingReserve(UITableView *tableView) {
+static void ApolloDuoRailApplyStarColumn(UITableView *tableView) {
     if (!tableView) return;
-    int mode = ApolloDuoRailCurrentMode();
-    if (!ApolloDuoRailTableShouldReserveTrailing(mode)
-        || !ApolloDuoRailTableLooksLikeRedditList(tableView)) {
-        ApolloDuoRailRestoreTableTrailing(tableView);
-        return;
-    }
     if (tableView.cellLayoutMarginsFollowReadableWidth) {
         tableView.cellLayoutMarginsFollowReadableWidth = NO;
     }
-
-    CGFloat indexWidth = 0.0;
-    CGFloat indexLeading = 0.0;
-    ApolloDuoRailMeasureIndex(tableView, &indexWidth, &indexLeading);
-    CGFloat pillOverlap = ApolloDuoRailMeasurePillOverlap(tableView);
-    CGFloat indexReserve = (CGFloat)ApolloDuoRailTableIndexReserve((double)indexWidth,
-                                                                  0.0,
-                                                                  (double)ApolloDuoRailRowStarIndexGap,
-                                                                  (double)ApolloDuoRailTableIndexFloor);
-    CGFloat reserve = (CGFloat)ApolloDuoRailTableModeReserve(mode,
-                                                            (double)indexReserve,
-                                                            (double)pillOverlap);
-    if (reserve < (CGFloat)ApolloDuoRailTableIndexFloor && indexWidth > 0.5) {
-        reserve = (CGFloat)ApolloDuoRailTableIndexFloor;
-    }
-
-    if (!objc_getAssociatedObject(tableView, &kApolloDuoRailSavedTableMarginRightKey)) {
-        objc_setAssociatedObject(tableView, &kApolloDuoRailSavedTableMarginRightKey,
-                                 @(tableView.layoutMargins.right),
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        objc_setAssociatedObject(tableView, &kApolloDuoRailSavedTableDirTrailingKey,
-                                 @(tableView.directionalLayoutMargins.trailing),
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    UIEdgeInsets margins = tableView.layoutMargins;
-    if (ApolloDuoRailTableReserveNeedsUpdate((double)margins.right, (double)reserve)) {
-        margins.right = reserve;
-        tableView.layoutMargins = margins;
-    }
-    NSDirectionalEdgeInsets dir = tableView.directionalLayoutMargins;
-    if (ApolloDuoRailTableReserveNeedsUpdate((double)dir.trailing, (double)reserve)) {
-        dir.trailing = reserve;
-        tableView.directionalLayoutMargins = dir;
-    }
-    NSNumber *previous = objc_getAssociatedObject(tableView, &kApolloDuoRailLastTableReserveKey);
-    objc_setAssociatedObject(tableView, &kApolloDuoRailLastTableReserveKey, @(reserve),
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
     for (UITableViewCell *cell in tableView.visibleCells) {
         ApolloDuoRailPrepareSubredditRow(cell);
         ApolloDuoRailTightenSubredditRow(cell);
     }
-    UIView *column = objc_getAssociatedObject(tableView, &kApolloDuoRailStarColumnKey);
-    if (column || previous) {
-        ApolloDuoRailSyncStarColumn(tableView, reserve);
-    }
-    if (!previous || ApolloDuoRailTableReserveNeedsUpdate(previous.doubleValue, (double)reserve)) {
-        ApolloLog(@"[ApolloDuoStar] table reserve=%.1f index=%.1f pill=%.1f overlay=%d",
-                  reserve, indexWidth, pillOverlap,
-                  objc_getAssociatedObject(tableView, &kApolloDuoRailStarColumnKey) ? 1 : 0);
-    }
+    ApolloDuoRailSyncStarColumn(tableView);
 }
 
 static void ApolloDuoRailScheduleDeferredReanchor(UITableView *tableView, BOOL shouldDefer) {
@@ -1362,7 +1398,7 @@ static void ApolloDuoRailScheduleDeferredReanchor(UITableView *tableView, BOOL s
 void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout) {
     if (!tableView) return;
     int mode = ApolloDuoRailCurrentMode();
-    if (!ApolloDuoRailTableShouldReserveTrailing(mode)) {
+    if (!ApolloDuoRailStarColumnShouldApply(mode)) {
         ApolloDuoRailRestoreTableTrailing(tableView);
         return;
     }
@@ -1378,7 +1414,7 @@ void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayou
     }
     sApolloDuoRailLastReanchorMode = mode;
 
-    ApolloDuoRailApplyTableTrailingReserve(tableView);
+    ApolloDuoRailApplyStarColumn(tableView);
     if (forceLayout) {
         ApolloDuoRailScheduleDeferredReanchor(tableView, 0);
     } else {
@@ -1387,16 +1423,11 @@ void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayou
 }
 
 void ApolloDuoRailReanchorVisibleStars(UITableView *tableView) {
-    ApolloDuoRailApplyTableTrailingReserve(tableView);
+    ApolloDuoRailApplyStarColumn(tableView);
 }
 
 void ApolloDuoRailRefreshVisibleStars(UITableView *tableView) {
-    if (!tableView) return;
-    NSNumber *reserve = objc_getAssociatedObject(tableView, &kApolloDuoRailLastTableReserveKey);
-    UIView *column = objc_getAssociatedObject(tableView, &kApolloDuoRailStarColumnKey);
-    if (column && column.superview) {
-        ApolloDuoRailSyncStarColumn(tableView, reserve ? reserve.doubleValue : 0.0);
-    }
+    ApolloDuoRailSyncStarColumn(tableView);
 }
 
 void ApolloDuoRailReanchorVisibleStarsAfterLayout(UITableView *tableView) {
