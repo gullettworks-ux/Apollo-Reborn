@@ -44,8 +44,11 @@ void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
 
 /// Re-anchor visible RedditList stars. forceLayout YES runs the
-/// table+cell layoutIfNeeded pass (appear / mode / rotation only).
-/// forceLayout NO is scroll / layoutSubviews (frame nudge only).
+/// table+cell layoutIfNeeded pass (appear / mode / rotation only)
+/// and schedules one bounded deferred pass so first Open uses the
+/// settled contentView width. forceLayout NO is scroll /
+/// layoutSubviews (frame nudge only; never parks on stale Closed
+/// width). Open↔Closed clears any cached Closed column.
 void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout);
 
 /// Duo RedditList: re-anchor without forcing layout.

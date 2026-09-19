@@ -166,6 +166,86 @@ int main(void) {
           "a correctly anchored star does not retry");
     Check(!ApolloDuoRailRowShouldScheduleStarRetry(3, 0, 1),
           "retries stop at the bounded limit");
+    Check(ApolloDuoRailRowContentLooksStaleForOpen(744.0, 1133.0, 744.0),
+          "Closed-width content on an Open window is stale first-paint geometry");
+    Check(ApolloDuoRailRowContentLooksStaleForOpen(390.0, 1133.0, 744.0),
+          "a leftover phone column on an Open window is stale");
+    Check(!ApolloDuoRailRowContentLooksStaleForOpen(1013.0, 1133.0, 744.0),
+          "Open fill-width contentView is not stale");
+    Check(!ApolloDuoRailRowContentLooksStaleForOpen(744.0, 744.0, 1133.0),
+          "Closed portrait content matching the Closed window is not Open-stale");
+    Check(ApolloDuoRailRowContentViewLooksLetterboxed(744.0, 1013.0),
+          "Closed-width contentView inside an Open-wide cell is letterboxed");
+    Check(!ApolloDuoRailRowContentViewLooksLetterboxed(997.0, 1013.0),
+          "contentView inset only by the A–Z strip is not letterboxed");
+    Check(ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeOpen, 0.0, 0.0),
+          "Open mode with no window yet is unsettled");
+    Check(ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeOpen, 744.0, 1133.0),
+          "stored Open with a still-Closed window must wait");
+    Check(!ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeOpen, 1133.0, 744.0),
+          "Open mode with an Open window is settled");
+    Check(!ApolloDuoRailRowOpenBoundsUnsettled(ApolloDuoModeClosed, 0.0, 0.0),
+          "Closed does not wait on Open window bounds");
+    Check(ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeClosed, 744.0, 744.0,
+                                                 1133.0, 744.0),
+          "re-anchor before mode settles to Open must defer");
+    Check(ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeOpen, 744.0, 744.0,
+                                                 1133.0, 744.0),
+          "Open mode with Closed table/content width must defer");
+    Check(ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeOpen, 744.0, 1013.0,
+                                                 1133.0, 744.0),
+          "wide table with still-narrow contentView must defer");
+    Check(!ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeOpen, 1013.0, 1013.0,
+                                                  1133.0, 744.0),
+          "Open fill width is ready for the contentView re-anchor");
+    Check(!ApolloDuoRailRowShouldDeferOpenReanchor(ApolloDuoModeClosed, 744.0, 744.0,
+                                                  744.0, 1133.0),
+          "Closed portrait uses its own width immediately");
+    Check(!ApolloDuoRailRowShouldAcceptCurrentContent(0, 1),
+          "first stale Open pass must not park on the Closed column");
+    Check(ApolloDuoRailRowShouldAcceptCurrentContent(3, 1),
+          "exhausted retries accept the current width (Closed/portrait settle)");
+    Check(ApolloDuoRailRowShouldAcceptCurrentContent(0, 0),
+          "final Open content is accepted immediately");
+    Check(!ApolloDuoRailRowShouldNudgeStarIfReady(250.0, 384.0, 1),
+          "do not nudge onto a stale Closed/narrow maxX");
+    Check(ApolloDuoRailRowShouldNudgeStarIfReady(250.0, 1005.0, 0),
+          "once Open width is live, a mid-pane star is nudged");
+    Check(ApolloDuoRailRowShouldScheduleStarRetryForGeometry(0, 1, 0, 1),
+          "on-target of a stale Closed column still retries");
+    Check(!ApolloDuoRailRowShouldScheduleStarRetryForGeometry(0, 1, 0, 0),
+          "on-target of final Open width does not retry");
+    Check(ApolloDuoRailRowShouldScheduleDeferredForce(0, 0, 1, 0),
+          "force-layout once is not enough; schedule one deferred Open pass");
+    Check(!ApolloDuoRailRowShouldScheduleDeferredForce(1, 0, 1, 1),
+          "a deferred pass already queued is not stacked (hang-safe)");
+    Check(ApolloDuoRailRowShouldScheduleDeferredForce(0, 1, 1, 1),
+          "still-stale Open geometry keeps deferring within the cap");
+    Check(!ApolloDuoRailRowShouldScheduleDeferredForce(0, 3, 1, 1),
+          "deferred Open re-anchor stops at the bounded limit");
+    Check(!ApolloDuoRailRowShouldScheduleDeferredForce(0, 1, 1, 0),
+          "a settled Open pass does not keep force-layouting");
+    Check(ApolloDuoRailRowShouldClearCachedColumn(1, ApolloDuoModeClosed, ApolloDuoModeOpen),
+          "Closed→Open drops the cached Closed column");
+    Check(ApolloDuoRailRowShouldClearCachedColumn(1, ApolloDuoModeOpen, ApolloDuoModeClosed),
+          "Open→Closed drops the cached Open column");
+    Check(!ApolloDuoRailRowShouldClearCachedColumn(0, ApolloDuoModeClosed, ApolloDuoModeOpen),
+          "first paint has no cached column to clear");
+    Check(!ApolloDuoRailRowShouldClearCachedColumn(1, ApolloDuoModeOpen, ApolloDuoModeOpen),
+          "same-mode re-anchor keeps the live column");
+    Check(ApolloDuoRailRowShouldRevisitMargins(744.0, 1013.0, ApolloDuoModeClosed,
+                                              ApolloDuoModeOpen),
+          "content that grew from Closed to Open must revisit margins");
+    Check(ApolloDuoRailRowShouldRevisitMargins(1013.0, 744.0, ApolloDuoModeOpen,
+                                              ApolloDuoModeClosed),
+          "Open→Closed revisits margins even when width shrinks");
+    Check(!ApolloDuoRailRowShouldRevisitMargins(1013.0, 1013.0, ApolloDuoModeOpen,
+                                               ApolloDuoModeOpen),
+          "stable Open width does not revisit margins");
+    Check(ApolloDuoRailRowMarginsNeedReset(744.0, 1013.0, 16.0, 16.0),
+          "letterboxed Open contentView resets even with stock leading");
+    Check(!ApolloDuoRailRowMarginsNeedReset(400.0, 400.0, 16.0, 16.0),
+          "Closed/portrait stock margins stay put");
     Check(ApolloDuoRailRowStarSearchMinX(880.0) == 48.0,
           "wide first-paint search still finds a mid-pane star");
     Check(ApolloDuoRailRowStarSearchMinX(200.0) == 30.0,

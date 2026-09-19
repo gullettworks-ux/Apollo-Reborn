@@ -18,9 +18,12 @@
 // (portrait-sized Duo window) is Phone-like: stock bottom tab bar,
 // no Apollo side rail. Regular iPhone stays on the stock tab bar.
 // Selected item uses the theme accent (blue on stock) as a rounded
-// pill. FeedSplit tiling stays off. Per-cell RedditList Tighten pins
-// favorite stars to a hang-safe far-right column on Open and Closed
-// RedditList rows. Closed has no side rail.
+// pill. FeedSplit tiling stays off. After rail/safe-area insets,
+// RedditList force-layouts then re-anchors native stars in
+// contentView coordinates (Open + Closed). First Open often still
+// has Closed/narrow contentView — do not park there; defer one
+// bounded force+reanchor until Open fill width is live. Closed
+// has no side rail.
 //
 // Mode keys off UIWindow.bounds (never UIScreen.mainScreen). First
 // show defaults to Subs: stock popToRoot onto RedditList. Navigation
@@ -59,7 +62,12 @@ static char kApolloDuoRailRowStarDisabledConstraintsKey;
 static char kApolloDuoRailRowMarginsResetKey;
 static char kApolloDuoRailRowStarRetryKey;
 static char kApolloDuoRailRowStarRetryScheduledKey;
+static char kApolloDuoRailRowLastModeKey;
+static char kApolloDuoRailRowLastContentWidthKey;
 static BOOL sApolloDuoRailStarLayoutPass = NO;
+static BOOL sApolloDuoRailDeferredScheduled = NO;
+static int sApolloDuoRailDeferredAttempt = 0;
+static int sApolloDuoRailLastReanchorMode = -1;
 static BOOL sApolloDuoRailPickingSubreddits = NO;
 static BOOL sApolloDuoRailOpenedDefaultDirectory = NO;
 
@@ -850,17 +858,90 @@ static void ApolloDuoRailClaimStarConstraintsOnce(UIView *star) {
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
+static void ApolloDuoRailWindowSizeForView(UIView *view, CGFloat *outWidth, CGFloat *outHeight) {
+    UIWindow *window = view.window ?: ApolloDeviceAppWindow();
+    CGSize size = window ? window.bounds.size : CGSizeZero;
+    if (outWidth) *outWidth = size.width;
+    if (outHeight) *outHeight = size.height;
+}
+
+static BOOL ApolloDuoRailRowGeometryIsStale(UIView *probe, UITableView *table, int mode) {
+    CGFloat windowWidth = 0.0;
+    CGFloat windowHeight = 0.0;
+    ApolloDuoRailWindowSizeForView(probe ?: (UIView *)table, &windowWidth, &windowHeight);
+    CGFloat contentWidth = 0.0;
+    CGFloat tableWidth = table ? CGRectGetWidth(table.bounds) : 0.0;
+    if ([probe isKindOfClass:[UITableViewCell class]]) {
+        UITableViewCell *cell = (UITableViewCell *)probe;
+        contentWidth = CGRectGetWidth(cell.contentView.bounds);
+        if (ApolloDuoRailRowContentViewLooksLetterboxed((double)contentWidth,
+                                                        (double)CGRectGetWidth(cell.bounds))) {
+            return YES;
+        }
+    } else if (probe) {
+        contentWidth = CGRectGetWidth(probe.bounds);
+    }
+    return ApolloDuoRailRowShouldDeferOpenReanchor(mode,
+                                                   (double)contentWidth,
+                                                   (double)tableWidth,
+                                                   (double)windowWidth,
+                                                   (double)windowHeight) ? YES : NO;
+}
+
+static void ApolloDuoRailClearRowColumnCache(UITableViewCell *cell) {
+    if (!cell) return;
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowStarRetryKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowStarRetryScheduledKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowLastModeKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowLastContentWidthKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void ApolloDuoRailRememberRowGeometry(UITableViewCell *cell, int mode, double contentWidth) {
+    if (!cell) return;
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowLastModeKey, @(mode),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(cell, &kApolloDuoRailRowLastContentWidthKey, @(contentWidth),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 static void ApolloDuoRailResetStaleRowMargins(UITableViewCell *cell) {
-    if (!cell || objc_getAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey)) return;
+    if (!cell) return;
     UIView *content = cell.contentView;
     if (!content) return;
     UIEdgeInsets margins = content.layoutMargins;
     CGFloat contentWidth = CGRectGetWidth(content.bounds);
-    if (!ApolloDuoRailRowMarginsLookCentered((double)contentWidth,
-                                             (double)margins.left,
-                                             (double)ApolloDuoRailRowStockLead)) {
-        objc_setAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey, @YES,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    CGFloat cellWidth = CGRectGetWidth(cell.bounds);
+    int mode = ApolloDuoRailCurrentMode();
+    NSNumber *lastModeValue = objc_getAssociatedObject(cell, &kApolloDuoRailRowLastModeKey);
+    NSNumber *lastWidthValue = objc_getAssociatedObject(cell, &kApolloDuoRailRowLastContentWidthKey);
+    BOOL revisit = lastModeValue
+        && ApolloDuoRailRowShouldRevisitMargins(lastWidthValue ? lastWidthValue.doubleValue : 0.0,
+                                                (double)contentWidth,
+                                                lastModeValue.intValue,
+                                                mode);
+    if (objc_getAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey) && !revisit) return;
+    CGFloat windowWidth = 0.0;
+    CGFloat windowHeight = 0.0;
+    ApolloDuoRailWindowSizeForView(cell, &windowWidth, &windowHeight);
+    BOOL stale = ApolloDuoRailRowShouldDeferOpenReanchor(mode,
+                                                         (double)contentWidth,
+                                                         (double)cellWidth,
+                                                         (double)windowWidth,
+                                                         (double)windowHeight) ? YES : NO;
+    if (!ApolloDuoRailRowMarginsNeedReset((double)contentWidth,
+                                          (double)cellWidth,
+                                          (double)margins.left,
+                                          (double)ApolloDuoRailRowStockLead)) {
+        if (!stale) {
+            objc_setAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey, @YES,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         return;
     }
     cell.preservesSuperviewLayoutMargins = NO;
@@ -922,7 +1003,9 @@ static void ApolloDuoRailSyncStarProxyInContentView(UITableViewCell *cell, UIVie
 
 // Native star in contentView coordinates — never cell.bounds (stale
 // on first Open paint). Column is contentView.maxX minus live
-// trailing (margins / A–Z), after layout has finished.
+// trailing (margins / A–Z), after Open bounds have settled. A
+// Closed/narrow first pass must not park; scroll later sees the
+// real Open width.
 static BOOL ApolloDuoRailReanchorStarInContentView(UITableViewCell *cell, int mode) {
     if (!cell || cell.editing) return NO;
     UIView *content = cell.contentView;
@@ -931,7 +1014,14 @@ static BOOL ApolloDuoRailReanchorStarInContentView(UITableViewCell *cell, int mo
     if (!star || !star.superview) return NO;
 
     CGFloat contentWidth = CGRectGetWidth(content.bounds);
-    if (contentWidth < 1.0) return NO;
+    if (contentWidth < 1.0) return YES;
+    UITableView *table = ApolloDuoRailTableForCell(cell);
+    NSInteger attempt = [objc_getAssociatedObject(cell, &kApolloDuoRailRowStarRetryKey) integerValue];
+    BOOL stale = ApolloDuoRailRowGeometryIsStale(cell, table, mode);
+    if (stale && !ApolloDuoRailRowShouldAcceptCurrentContent((int)attempt, 1)) {
+        ApolloDuoRailRememberRowGeometry(cell, mode, (double)contentWidth);
+        return YES;
+    }
     CGFloat marginRight = content.layoutMargins.right;
     CGFloat indexStrip = MAX(0.0, CGRectGetWidth(cell.bounds) - CGRectGetMaxX(content.frame));
     if (indexStrip > 2.0) indexStrip = 0.0;
@@ -942,7 +1032,8 @@ static BOOL ApolloDuoRailReanchorStarInContentView(UITableViewCell *cell, int mo
                                                                  (double)trailing);
     CGRect inContent = [content convertRect:star.bounds fromView:star];
     CGFloat haveMaxX = CGRectGetMaxX(inContent);
-    if (ApolloDuoRailRowShouldNudgeStar((double)haveMaxX, (double)wantMaxX)) {
+    if (ApolloDuoRailRowShouldNudgeStarIfReady((double)haveMaxX, (double)wantMaxX,
+                                               stale ? 1 : 0)) {
         ApolloDuoRailClaimStarConstraintsOnce(star);
         CGRect inSuperview = [star.superview convertRect:inContent fromView:content];
         inSuperview.origin.x += (wantMaxX - haveMaxX);
@@ -951,7 +1042,9 @@ static BOOL ApolloDuoRailReanchorStarInContentView(UITableViewCell *cell, int mo
         inContent = [content convertRect:star.bounds fromView:star];
     }
     ApolloDuoRailSyncStarProxyInContentView(cell, star);
-    return ApolloDuoRailRowShouldNudgeStar(CGRectGetMaxX(inContent), (double)wantMaxX);
+    ApolloDuoRailRememberRowGeometry(cell, mode, (double)contentWidth);
+    return ApolloDuoRailRowShouldNudgeStar(CGRectGetMaxX(inContent), (double)wantMaxX)
+        || (stale && !ApolloDuoRailRowShouldAcceptCurrentContent((int)attempt, 1));
 }
 
 static void ApolloDuoRailScheduleStarRetry(UITableViewCell *cell) {
@@ -1003,12 +1096,7 @@ void ApolloDuoRailPrepareSubredditRow(UITableViewCell *cell) {
 
 void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell) {
     if (!cell) return;
-    objc_setAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey, nil,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(cell, &kApolloDuoRailRowStarRetryKey, nil,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(cell, &kApolloDuoRailRowStarRetryScheduledKey, nil,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    ApolloDuoRailClearRowColumnCache(cell);
     ApolloDuoRailReleaseLeadingView(cell);
 }
 
@@ -1020,6 +1108,12 @@ void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell) {
     if (cell.editing) return;
     const char *name = class_getName(cell.class);
     if (name && strstr(name, "ApolloSubtitleTableViewCell")) return;
+    NSNumber *lastModeValue = objc_getAssociatedObject(cell, &kApolloDuoRailRowLastModeKey);
+    if (ApolloDuoRailRowShouldClearCachedColumn(lastModeValue ? 1 : 0,
+                                                lastModeValue.intValue,
+                                                mode)) {
+        ApolloDuoRailClearRowColumnCache(cell);
+    }
     UITableView *table = ApolloDuoRailTableForCell(cell);
     if (table && table.cellLayoutMarginsFollowReadableWidth) {
         table.cellLayoutMarginsFollowReadableWidth = NO;
@@ -1027,7 +1121,11 @@ void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell) {
     BOOL stillOff = ApolloDuoRailReanchorStarInContentView(cell, mode);
     UIView *star = ApolloDuoRailFindStarInCell(cell);
     NSInteger attempt = [objc_getAssociatedObject(cell, &kApolloDuoRailRowStarRetryKey) integerValue];
-    if (ApolloDuoRailRowShouldScheduleStarRetry((int)attempt, star ? 1 : 0, stillOff ? 1 : 0)) {
+    BOOL stale = ApolloDuoRailRowGeometryIsStale(cell, table, mode);
+    if (ApolloDuoRailRowShouldScheduleStarRetryForGeometry((int)attempt,
+                                                           star ? 1 : 0,
+                                                           stillOff ? 1 : 0,
+                                                           stale ? 1 : 0)) {
         ApolloDuoRailScheduleStarRetry(cell);
     }
 }
@@ -1050,6 +1148,27 @@ static BOOL ApolloDuoRailTableLooksLikeRedditList(UITableView *tableView) {
     return vcName && strstr(vcName, "RedditListViewController") != NULL;
 }
 
+static void ApolloDuoRailScheduleDeferredReanchor(UITableView *tableView, BOOL shouldDefer) {
+    if (!tableView) return;
+    if (!ApolloDuoRailRowShouldScheduleDeferredForce(sApolloDuoRailDeferredScheduled ? 1 : 0,
+                                                     sApolloDuoRailDeferredAttempt,
+                                                     1,
+                                                     shouldDefer ? 1 : 0)) {
+        if (!shouldDefer) sApolloDuoRailDeferredAttempt = 0;
+        return;
+    }
+    sApolloDuoRailDeferredScheduled = YES;
+    __weak UITableView *weakTable = tableView;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        sApolloDuoRailDeferredScheduled = NO;
+        sApolloDuoRailDeferredAttempt += 1;
+        UITableView *strongTable = weakTable;
+        if (strongTable) {
+            ApolloDuoRailReanchorSubredditStars(strongTable, YES);
+        }
+    });
+}
+
 void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout) {
     if (!tableView) return;
     int mode = ApolloDuoRailCurrentMode();
@@ -1059,6 +1178,15 @@ void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayou
     if (tableView.cellLayoutMarginsFollowReadableWidth) {
         tableView.cellLayoutMarginsFollowReadableWidth = NO;
     }
+
+    if (sApolloDuoRailLastReanchorMode >= 0
+        && ApolloDuoRailRowShouldClearCachedColumn(1, sApolloDuoRailLastReanchorMode, mode)) {
+        for (UITableViewCell *cell in tableView.visibleCells) {
+            ApolloDuoRailClearRowColumnCache(cell);
+        }
+        sApolloDuoRailDeferredAttempt = 0;
+    }
+    sApolloDuoRailLastReanchorMode = mode;
 
     BOOL doForce = forceLayout && ApolloDuoRailRowShouldForceLayout(0)
         && ApolloDuoRailRowShouldBeginLayoutPass(sApolloDuoRailStarLayoutPass ? 1 : 0);
@@ -1077,8 +1205,16 @@ void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayou
         sApolloDuoRailStarLayoutPass = NO;
     }
 
+    BOOL anyStale = NO;
     for (UITableViewCell *cell in tableView.visibleCells) {
+        if (ApolloDuoRailRowGeometryIsStale(cell, tableView, mode)) anyStale = YES;
         ApolloDuoRailTightenSubredditRow(cell);
+    }
+    if (!anyStale) {
+        anyStale = ApolloDuoRailRowGeometryIsStale(tableView, tableView, mode);
+    }
+    if (forceLayout) {
+        ApolloDuoRailScheduleDeferredReanchor(tableView, anyStale);
     }
 }
 

@@ -295,6 +295,112 @@ static inline int ApolloDuoRailRowShouldScheduleStarRetry(int attempt,
     return needsNudge ? 1 : 0;
 }
 
+// Open window already landscape-wide, but contentView / table still
+// Closed or phone-column sized. Parking now is the first-open bug:
+// stars lock to the narrow maxX, then stillOff=NO so we stop.
+static inline int ApolloDuoRailRowContentLooksStaleForOpen(double contentWidth,
+                                                           double windowWidth,
+                                                           double windowHeight) {
+    if (contentWidth <= 0.0 || windowWidth <= 0.0) return 0;
+    if (ApolloDuoModeFromBounds(1, windowWidth, windowHeight) != ApolloDuoModeOpen
+        && ApolloDuoModeFromBounds(0, windowWidth, windowHeight) != ApolloDuoModeOpen) {
+        return 0;
+    }
+    double openFill = ApolloDuoRailContentFillWidthForMode(windowWidth, ApolloDuoModeOpen);
+    return contentWidth + (double)ApolloDuoRailLetterboxGap < openFill;
+}
+
+// contentView still a readable/Closed strip inside an already-wide cell.
+static inline int ApolloDuoRailRowContentViewLooksLetterboxed(double contentWidth,
+                                                              double cellWidth) {
+    if (contentWidth <= 0.0 || cellWidth <= 0.0) return 0;
+    return contentWidth + (double)ApolloDuoRailLetterboxGap < cellWidth;
+}
+
+// Stored mode is Open but the window is still 0×0 or Closed-sized.
+static inline int ApolloDuoRailRowOpenBoundsUnsettled(int mode,
+                                                      double windowWidth,
+                                                      double windowHeight) {
+    if (mode != ApolloDuoModeOpen) return 0;
+    if (windowWidth <= 0.0 || windowHeight <= 0.0) return 1;
+    return ApolloDuoModeFromBounds(1, windowWidth, windowHeight) != ApolloDuoModeOpen
+        && ApolloDuoModeFromBounds(0, windowWidth, windowHeight) != ApolloDuoModeOpen;
+}
+
+// Defer the contentView re-anchor until Open fill width is live.
+static inline int ApolloDuoRailRowShouldDeferOpenReanchor(int mode,
+                                                          double contentWidth,
+                                                          double tableWidth,
+                                                          double windowWidth,
+                                                          double windowHeight) {
+    if (ApolloDuoRailRowOpenBoundsUnsettled(mode, windowWidth, windowHeight)) {
+        return 1;
+    }
+    if (ApolloDuoRailRowContentLooksStaleForOpen(contentWidth, windowWidth, windowHeight)) {
+        return 1;
+    }
+    if (ApolloDuoRailRowContentLooksStaleForOpen(tableWidth, windowWidth, windowHeight)) {
+        return 1;
+    }
+    return 0;
+}
+
+// Do not nudge onto a stale Closed/narrow maxX. After the retry
+// budget, accept the current width so Closed/portrait can settle.
+static inline int ApolloDuoRailRowShouldAcceptCurrentContent(int attempt,
+                                                             int contentLooksStale) {
+    if (!contentLooksStale) return 1;
+    return attempt >= ApolloDuoRailRowStarRetryLimit ? 1 : 0;
+}
+
+static inline int ApolloDuoRailRowShouldNudgeStarIfReady(double haveMaxX,
+                                                         double wantMaxX,
+                                                         int contentLooksStale) {
+    if (contentLooksStale) return 0;
+    return ApolloDuoRailRowShouldNudgeStar(haveMaxX, wantMaxX);
+}
+
+// Retry when the star is missing, still off, or parked on stale
+// Closed geometry (the old 3-arg helper treats that as "on target").
+static inline int ApolloDuoRailRowShouldScheduleStarRetryForGeometry(int attempt,
+                                                                     int hasStar,
+                                                                     int needsNudge,
+                                                                     int contentLooksStale) {
+    if (attempt >= ApolloDuoRailRowStarRetryLimit) return 0;
+    if (contentLooksStale) return 1;
+    return ApolloDuoRailRowShouldScheduleStarRetry(attempt, hasStar, needsNudge);
+}
+
+// One deferred force-layout after appear/mode (Open bounds often
+// land on the next pass). Keep retrying only while still stale.
+// alreadyScheduled / attempt cap keeps this hang-safe.
+static inline int ApolloDuoRailRowShouldScheduleDeferredForce(int alreadyScheduled,
+                                                              int attempt,
+                                                              int fromForceLayout,
+                                                              int shouldDefer) {
+    if (alreadyScheduled) return 0;
+    if (attempt >= ApolloDuoRailRowStarRetryLimit) return 0;
+    if (shouldDefer) return 1;
+    return fromForceLayout && attempt == 0 ? 1 : 0;
+}
+
+// Open↔Closed (or any mode change) must drop a cached Closed column
+// so leftover margins / parked X cannot survive the next pass.
+static inline int ApolloDuoRailRowShouldClearCachedColumn(int hasLastMode,
+                                                          int lastMode,
+                                                          int newMode) {
+    if (!hasLastMode) return 0;
+    return lastMode != newMode;
+}
+
+static inline int ApolloDuoRailRowShouldRevisitMargins(double lastContentWidth,
+                                                       double contentWidth,
+                                                       int lastMode,
+                                                       int newMode) {
+    if (lastMode != newMode) return 1;
+    return contentWidth > lastContentWidth + (double)ApolloDuoRailLetterboxGap;
+}
+
 // Walk-search floor so a mid-pane first-paint star is still found.
 static inline double ApolloDuoRailRowStarSearchMinX(double contentWidth) {
     if (contentWidth <= 0.0) return 0.0;
@@ -312,6 +418,16 @@ static inline int ApolloDuoRailRowMarginsLookCentered(double contentWidth,
     if (contentWidth <= 0.0) return 0;
     if (marginLeft < stockLead) marginLeft = stockLead;
     return (marginLeft - stockLead) > 24.0;
+}
+
+static inline int ApolloDuoRailRowMarginsNeedReset(double contentWidth,
+                                                   double cellWidth,
+                                                   double marginLeft,
+                                                   double stockLead) {
+    if (ApolloDuoRailRowMarginsLookCentered(contentWidth, marginLeft, stockLead)) {
+        return 1;
+    }
+    return ApolloDuoRailRowContentViewLooksLetterboxed(contentWidth, cellWidth);
 }
 
 // Hit-proxy origin in contentView: center on the native star, do not
