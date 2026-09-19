@@ -43,10 +43,6 @@ void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 /// No-op star-column math. Call from cellForRow / willDisplay.
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
 
-/// No-op. Native accessory stays visible; overlay fallback hides it
-/// itself. Kept so older call sites compile.
-void ApolloDuoRailHideNativeStarInRow(UITableViewCell *cell);
-
 /// Apply the table-level trailing reserve (A–Z + overlapping pill)
 /// and inherit it on visible cells. forceLayout YES schedules one
 /// bounded deferred pass after Open chrome settles.

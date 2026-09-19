@@ -846,21 +846,6 @@ static void ApolloDuoRailWindowSizeForView(UIView *view, CGFloat *outWidth, CGFl
     if (outHeight) *outHeight = size.height;
 }
 
-static void ApolloDuoRailRemoveStarProxies(UITableViewCell *cell) {
-    if (!cell) return;
-    NSArray<UIView *> *hosts = cell.contentView
-        ? @[cell.contentView, cell]
-        : @[cell];
-    for (UIView *host in hosts) {
-        for (UIView *subview in [host.subviews copy]) {
-            const char *name = class_getName(subview.class);
-            if (!name || strstr(name, "StarHitProxy") == NULL) continue;
-            subview.frame = CGRectZero;
-            [subview removeFromSuperview];
-        }
-    }
-}
-
 static void ApolloDuoRailClearRowColumnCache(UITableViewCell *cell) {
     if (!cell) return;
     objc_setAssociatedObject(cell, &kApolloDuoRailRowMarginsResetKey, nil,
@@ -999,10 +984,6 @@ void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell) {
     ApolloDuoRailRestoreNativeStar(ApolloDuoRailNativeStarControl(cell));
     ApolloDuoRailClearRowColumnCache(cell);
     ApolloDuoRailReleaseLeadingView(cell);
-}
-
-void ApolloDuoRailHideNativeStarInRow(UITableViewCell *cell) {
-    (void)cell;
 }
 
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell) {
