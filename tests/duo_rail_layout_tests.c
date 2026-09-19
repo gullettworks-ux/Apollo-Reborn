@@ -293,11 +293,56 @@ int main(void) {
           "row polish runs on Open and Closed Duo");
     Check(!ApolloDuoRailRowPolishShouldApply(ApolloDuoModePhone),
           "row polish does not run on regular iPhone");
-    Check(ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeOpen)
-              && ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeClosed),
-          "Duo Open and Closed install the custom Auto Layout star");
-    Check(!ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModePhone),
-          "regular iPhone keeps Apollo's native star");
+    Check(!ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeOpen)
+              && !ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModeClosed)
+              && !ApolloDuoRailRowShouldInstallCustomStar(ApolloDuoModePhone),
+          "per-cell custom stars are abandoned on every mode");
+    Check(ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModeOpen)
+              && ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModeClosed),
+          "Duo Open and Closed reserve trailing on the table");
+    Check(!ApolloDuoRailTableShouldReserveTrailing(ApolloDuoModePhone),
+          "regular iPhone does not apply a Duo table trailing reserve");
+    Check(ApolloDuoRailTableIndexReserve(16.0, 0.0, 8.0, 38.0) == 38.0,
+          "a 16pt A–Z strip still uses the 38pt polish floor");
+    Check(ApolloDuoRailTableIndexReserve(56.0, 0.0, 8.0, 38.0) == 64.0,
+          "a wider A–Z overlay is width + gap");
+    Check(ApolloDuoRailTableIndexReserve(16.0, 56.0, 8.0, 38.0) == 64.0,
+          "index reserve prefers the wider overlay");
+    Check(ApolloDuoRailTableIndexReserve(0.0, 0.0, 8.0, 38.0) == 0.0,
+          "no index strip does not invent a trailing column");
+    Check(ApolloDuoRailTablePillOverlap(1013.0, 940.0, 73.0) == 73.0,
+          "a trailing-half pill overlapping the list is reserved");
+    Check(ApolloDuoRailTablePillOverlap(1013.0, 0.0, 112.0) == 0.0,
+          "the leading Open rail is not a trailing pill");
+    Check(ApolloDuoRailTablePillOverlap(1013.0, 1013.0, 80.0) == 0.0,
+          "a pill already past table.maxX does not add reserve");
+    Check(ApolloDuoRailTablePillOverlap(400.0, 100.0, 80.0) == 0.0,
+          "a leading-half pill is ignored");
+    Check(ApolloDuoRailTableTrailingReserve(38.0, 0.0) == 38.0,
+          "A–Z reserve wins when no pill overlaps");
+    Check(ApolloDuoRailTableTrailingReserve(38.0, 80.0) == 80.0,
+          "an overlapping pill is the tighter (larger) reserve");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModePhone, 38.0, 80.0) == 0.0,
+          "Phone never applies the table reserve");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModeClosed, 38.0, 0.0) == 38.0,
+          "Closed reserve is A–Z only when no pill overlaps");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModeOpen, 38.0, 56.0) == 56.0,
+          "Open adds a measured trailing-pill overlap");
+    Check(ApolloDuoRailTableModeReserve(ApolloDuoModeClosed, 38.0, 0.0)
+              != ApolloDuoRailClosedOverlayClearance(),
+          "table reserve is not the removed Closed overlay column");
+    Check(ApolloDuoRailTableBandMaxX(1013.0, 38.0) == 975.0,
+          "content + native accessory end immediately left of the reserve");
+    Check(ApolloDuoRailNativeStarNeedsOverlay(1010.0, 975.0),
+          "a native star still past the reserved band needs the overlay fallback");
+    Check(!ApolloDuoRailNativeStarNeedsOverlay(975.0, 975.0),
+          "a native star on the reserved band does not need the overlay");
+    Check(ApolloDuoRailTableReserveNeedsUpdate(8.0, 38.0),
+          "raising a collapsed 8pt floor to the A–Z reserve is a write");
+    Check(!ApolloDuoRailTableReserveNeedsUpdate(38.0, 38.0),
+          "an already-applied table reserve is a no-op");
+    Check(ApolloDuoRailTableIndexFloor == 38,
+          "table index floor matches the Subreddit polish A–Z clear");
     Check(ApolloDuoRailRowShouldClaimStarButton(0),
           "first configure installs the custom star");
     Check(ApolloDuoRailRowShouldClaimStarButton(1),

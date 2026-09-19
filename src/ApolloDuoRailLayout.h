@@ -32,22 +32,25 @@ enum {
        FAVORITES titles mid-pane. Portrait (stock RedditList) is the look. */
     ApolloDuoRailRowMaxContentWidth = 480,
     ApolloDuoRailRowStarGap = 28,
-    /* Legacy fixed 38pt column — do NOT apply as the runtime star X.
-       The column is contentView.maxX minus live trailing (margins /
-       A–Z), computed after a force-layout pass. 8 is only a floor. */
+    /* Legacy fixed 38pt column — leftover. Runtime stars are Apollo's
+       native accessory, parked by a table-level trailing reserve, not
+       a per-cell X. 8 is only a leftover floor. */
     ApolloDuoRailRowStarTrailing = 38,
     ApolloDuoRailRowStarMinTrailing = 8,
     ApolloDuoRailSectionLineTrailing = 8,
     ApolloDuoRailRowTitleStarGap = 12,
     ApolloDuoRailRowStarRetryLimit = 3,
     ApolloDuoRailRowStarSearchFloor = 48,
-    /* Custom Duo star (not the native accessory). Size is the glyph;
-       hit slop is the button itself. Trailing is pinned to the live
-       UITableViewIndex leading edge minus this gap — never
-       contentView.trailing minus a fuzzy chrome/margin guess. */
+    /* Leftover custom-star metrics. Do NOT install ApolloDuoStarButton
+       or pin contentView.trailing. Kept so host tests cannot silently
+       revive the per-cell path. */
     ApolloDuoRailRowStarButtonSize = 28,
     ApolloDuoRailRowStarButtonHit = 44,
     ApolloDuoRailRowStarIndexGap = 8,
+    /* Table-level trailing reserve (runtime). Matches the Subreddit
+       index polish A–Z clear (38pt). Index + gap, then the overlapping
+       floating nav pill if that pill sits on the trailing half. */
+    ApolloDuoRailTableIndexFloor = 38,
     ApolloDuoCoverPillWidth = 80,   /* cover system pill; Compact only */
     ApolloDuoCoverPillBottom = 120, /* lift FABs above the cover gear */
     /* Subs nav chrome (title / Edit / floating +). Insets only the
@@ -311,14 +314,91 @@ static inline int ApolloDuoRailRowPolishShouldApply(int mode) {
     return mode == ApolloDuoModeOpen || mode == ApolloDuoModeClosed;
 }
 
-// Duo owns a custom star's appearance/position. Phone keeps Apollo's
-// native accessory. Reinstall on every configure / willDisplay /
-// open-close — one-shot claim left reused cells with a prior
-// subreddit binding and a stale trailing constant.
+// Abandoned. Per-cell ApolloDuoStarButton trailing collapsed on
+// reuse / Open↔Closed (contentAlreadyInset → 8pt floor, stars under
+// the A–Z / floating pill). Runtime restores the native accessory
+// and reserves trailing on the table instead.
 static inline int ApolloDuoRailRowShouldInstallCustomStar(int mode) {
+    (void)mode;
+    return 0;
+}
+
+// Duo RedditList only. Phone keeps Apollo's stock table margins.
+static inline int ApolloDuoRailTableShouldReserveTrailing(int mode) {
     return ApolloDuoRailRowPolishShouldApply(mode);
 }
 
+// A–Z reserve: max(live index, overlay) + gap, but never below the
+// 38pt polish floor while an index strip exists. No index → 0 (do
+// not invent a column).
+static inline double ApolloDuoRailTableIndexReserve(double indexWidth,
+                                                   double overlayWidth,
+                                                   double gap,
+                                                   double floor) {
+    double width = indexWidth > overlayWidth ? indexWidth : overlayWidth;
+    if (width < 0.0) width = 0.0;
+    if (gap < 0.0) gap = 0.0;
+    if (floor < 0.0) floor = 0.0;
+    if (width <= 0.5) return 0.0;
+    double reserve = width + gap;
+    return reserve > floor ? reserve : floor;
+}
+
+// Trailing-half chrome only. A leading Open sidebar is 0. A pill
+// sitting at/past table.maxX is 0 (already clear).
+static inline double ApolloDuoRailTablePillOverlap(double tableWidth,
+                                                  double pillMinXInTable,
+                                                  double pillWidth) {
+    if (tableWidth <= 0.0 || pillWidth <= 0.5) return 0.0;
+    if (pillMinXInTable >= tableWidth - 0.5) return 0.0;
+    double pillMaxX = pillMinXInTable + pillWidth;
+    if (pillMaxX <= tableWidth * 0.5) return 0.0;
+    double lead = pillMinXInTable;
+    if (lead < tableWidth * 0.5) lead = tableWidth * 0.5;
+    double overlap = tableWidth - lead;
+    return overlap > 0.0 ? overlap : 0.0;
+}
+
+// One number for table.layoutMargins.right / directional trailing.
+// Tighter (larger) of A–Z reserve and measured pill overlap.
+static inline double ApolloDuoRailTableTrailingReserve(double indexReserve,
+                                                      double pillOverlap) {
+    if (indexReserve < 0.0) indexReserve = 0.0;
+    if (pillOverlap < 0.0) pillOverlap = 0.0;
+    return indexReserve > pillOverlap ? indexReserve : pillOverlap;
+}
+
+static inline double ApolloDuoRailTableModeReserve(int mode,
+                                                  double indexReserve,
+                                                  double pillOverlap) {
+    if (!ApolloDuoRailTableShouldReserveTrailing(mode)) return 0.0;
+    return ApolloDuoRailTableTrailingReserve(indexReserve, pillOverlap);
+}
+
+static inline double ApolloDuoRailTableBandMaxX(double tableWidth, double reserve) {
+    if (tableWidth <= 0.0) return 0.0;
+    if (reserve < 0.0) reserve = 0.0;
+    double maxX = tableWidth - reserve;
+    return maxX > 0.0 ? maxX : 0.0;
+}
+
+static inline int ApolloDuoRailTableReserveNeedsUpdate(double have, double want) {
+    double gap = have - want;
+    if (gap < 0.0) gap = -gap;
+    return gap > 0.5;
+}
+
+// Overlay fallback only: native accessory still sits past the
+// reserved band (margins did not move accessoryButton).
+static inline int ApolloDuoRailNativeStarNeedsOverlay(double starMaxX,
+                                                     double bandMaxX) {
+    if (bandMaxX <= 0.5) return 0;
+    return starMaxX > bandMaxX + 0.5;
+}
+
+// Leftover custom-star install flags. Runtime never installs
+// ApolloDuoStarButton; host tests lock these so a reinstall path
+// cannot sneak back as the Duo star policy.
 static inline int ApolloDuoRailRowShouldReinstallStar(int alreadyInstalled) {
     (void)alreadyInstalled;
     return 1;

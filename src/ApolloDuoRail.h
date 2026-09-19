@@ -38,38 +38,36 @@ void ApolloDuoRailClearOpenContent(void);
 /// Favorite/sub rows get rail clearance only — no wide-row star cluster.
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView);
 
-/// Duo-only: tear down any stale star, bind the current subreddit,
-/// refresh filled/outline from Apollo, and pin the trailing edge to
-/// the live A–Z leading edge minus a small gap (fallback: mode
-/// reserve). Call from cellForRow, willDisplay, and after
-/// Open↔Closed. No-op on Phone. No native frame writes.
+/// Duo-only: strip leftover per-cell custom stars, restore the
+/// native accessory, and inherit the table trailing reserve.
+/// No-op star-column math. Call from cellForRow / willDisplay.
 void ApolloDuoRailTightenSubredditRow(UITableViewCell *cell);
 
-/// Hide the native accessory only (safe from layoutSubviews). Does
-/// not install or update Auto Layout.
+/// No-op. Native accessory stays visible; overlay fallback hides it
+/// itself. Kept so older call sites compile.
 void ApolloDuoRailHideNativeStarInRow(UITableViewCell *cell);
 
-/// Reinstall custom stars on visible RedditList rows. forceLayout YES
-/// also schedules one bounded deferred bind after Open chrome
-/// settles. No native-frame re-anchor.
+/// Apply the table-level trailing reserve (A–Z + overlapping pill)
+/// and inherit it on visible cells. forceLayout YES schedules one
+/// bounded deferred pass after Open chrome settles.
 void ApolloDuoRailReanchorSubredditStars(UITableView *tableView, BOOL forceLayout);
 
-/// Reinstall the custom star on every currently visible cell.
+/// Re-apply the table trailing reserve and sync the overlay column
+/// if that fallback is active.
 void ApolloDuoRailReanchorVisibleStars(UITableView *tableView);
 
-/// Scroll-safe: rebind name / filled state and update the live
-/// trailing constant. Does not tear down an already-correct button.
+/// Scroll-safe: sync the overlay star column to visibleCells.
+/// Does not write per-cell trailing constants.
 void ApolloDuoRailRefreshVisibleStars(UITableView *tableView);
 
-/// Coalesced next-turn reinstall after table/VC layout.
+/// Coalesced next-turn table-reserve pass after table/VC layout.
 void ApolloDuoRailReanchorVisibleStarsAfterLayout(UITableView *tableView);
 
-/// Duo RedditList: reinstall custom stars without forcing layout.
+/// Duo RedditList: apply the table trailing reserve.
 void ApolloDuoRailPolishSubredditList(UITableView *tableView);
 
-/// Drop the custom star, its trailing constraint, and the prior
-/// subreddit binding. prepareForReuse must call this so reuse
-/// cannot inherit a previous cell's frame or Favorite state.
+/// Strip leftover custom stars and restore the native accessory.
+/// prepareForReuse does not rebind a star column.
 void ApolloDuoRailResetSubredditRowReuse(UITableViewCell *cell);
 
 /// One-shot readable/center margin reset. Not for layoutSubviews.

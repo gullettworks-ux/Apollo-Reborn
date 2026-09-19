@@ -85,11 +85,6 @@
 
 %hook _TtC6Apollo23RedditListTableViewCell
 
-- (void)layoutSubviews {
-    %orig;
-    ApolloDuoRailHideNativeStarInRow((UITableViewCell *)self);
-}
-
 - (void)prepareForReuse {
     ApolloDuoRailResetSubredditRowReuse((UITableViewCell *)self);
     %orig;
