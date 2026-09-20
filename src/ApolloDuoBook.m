@@ -10,6 +10,7 @@
 #import "ApolloDuoCompatibility.h"
 #import "ApolloDuoRail.h"
 #import "ApolloDuoSubsChrome.h"
+#import "ApolloPerPostCommentSort.h"
 #import "ApolloState.h"
 
 // Sibling detail host — not Mail-style dual-VC tiling inside one
@@ -27,6 +28,9 @@ static char kApolloDuoBookActiveKey;
 static char kApolloDuoBookPostureKey;
 static char kApolloDuoBookSavedNavFrameKey;
 static char kApolloDuoBookSavedSafeInsetsKey;
+static char kApolloDuoBookGapKey;
+static char kApolloDuoBookPostKeyKey;
+static char kApolloDuoBookPendingKey;
 
 static int sApolloDuoBookHingeStatus = ApolloDuoHingeUnknown;
 static BOOL sApolloDuoBookHingeInstalled = NO;
@@ -41,6 +45,9 @@ static int sApolloDuoBookLastLogHint = -1;
 static double sApolloDuoBookLastLogUsable = -1.0;
 static CFAbsoluteTime sApolloDuoBookLastLogAt = 0.0;
 static BOOL sApolloDuoBookApplying = NO;
+static int sApolloDuoBookSizeTransitionCount = 0;
+static unsigned sApolloDuoBookSizeTransitionGen = 0;
+static CFAbsoluteTime sApolloDuoBookSizeTransitionAt = 0.0;
 
 @interface ApolloDuoBookPlaceholderViewController : UIViewController
 @end
@@ -97,32 +104,107 @@ static BOOL ApolloDuoBookClassLooksLikeMedia(Class cls) {
         || strstr(name, "ImageViewer") != NULL;
 }
 
-static BOOL ApolloDuoBookTreeHasMedia(UIViewController *controller, int depth) {
-    if (!controller || depth > 6) return NO;
+static BOOL ApolloDuoBookTreeHasOverlay(UIViewController *controller, int depth) {
+    if (!controller || depth > 8) return NO;
     if (ApolloDuoBookClassLooksLikeMedia(controller.class)) return YES;
-    if (controller.presentedViewController
-        && ApolloDuoBookTreeHasMedia(controller.presentedViewController, depth + 1)) {
+    UIViewController *presented = controller.presentedViewController;
+    if (presented && !presented.isBeingDismissed) return YES;
+    if (controller.transitionCoordinator) return YES;
+    if (presented && ApolloDuoBookTreeHasOverlay(presented, depth + 1)) return YES;
+    for (UIViewController *child in controller.childViewControllers) {
+        UIViewController *childPresented = child.presentedViewController;
+        if (childPresented && !childPresented.isBeingDismissed) return YES;
+        if (child.transitionCoordinator) return YES;
+        if (ApolloDuoBookClassLooksLikeMedia(child.class)) return YES;
+    }
+    return NO;
+}
+
+static BOOL ApolloDuoBookOverlayIsUp(void) {
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    if (ApolloDuoBookTreeHasOverlay(tabs, 0)) return YES;
+    UIWindow *window = tabs.view.window ?: ApolloDeviceAppWindow();
+    UIViewController *root = window.rootViewController;
+    if (root && root != (UIViewController *)tabs && ApolloDuoBookTreeHasOverlay(root, 0)) {
         return YES;
     }
     return NO;
 }
 
-static BOOL ApolloDuoBookMediaPresenterIsUp(void) {
+static void ApolloDuoBookShowDetail(UITabBarController *tabs, UIViewController *comments);
+static BOOL ApolloDuoBookAlreadyShows(UITabBarController *tabs, UIViewController *comments);
+
+static BOOL ApolloDuoBookCoordinatorIsUp(void) {
     UITabBarController *tabs = ApolloDuoBookTabs();
-    if (ApolloDuoBookTreeHasMedia(tabs, 0)) return YES;
-    UIWindow *window = tabs.view.window ?: ApolloDeviceAppWindow();
-    UIViewController *root = window.rootViewController;
-    if (root && root != (UIViewController *)tabs && ApolloDuoBookTreeHasMedia(root, 0)) {
+    if (tabs.transitionCoordinator) return YES;
+    UIViewController *selected = tabs.selectedViewController;
+    if (selected.transitionCoordinator) return YES;
+    if (selected.presentedViewController.transitionCoordinator) return YES;
+    UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
+    if (host.transitionCoordinator || host.presentedViewController.transitionCoordinator) {
         return YES;
     }
+    UIViewController *detailNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
+    if (detailNav.transitionCoordinator) return YES;
     return NO;
+}
+
+static BOOL ApolloDuoBookSizeTransitionIsUp(void) {
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    if (sApolloDuoBookSizeTransitionCount > 0) {
+        if (sApolloDuoBookSizeTransitionAt > 0.0
+            && (now - sApolloDuoBookSizeTransitionAt) > 1.25) {
+            sApolloDuoBookSizeTransitionCount = 0;
+        } else {
+            return YES;
+        }
+    }
+    // Debounce window after the last Begin/End so layout/size-class
+    // churn cannot TearDown + re-host between coordinator callbacks.
+    if (sApolloDuoBookSizeTransitionAt > 0.0
+        && (now - sApolloDuoBookSizeTransitionAt) < 0.40) {
+        return YES;
+    }
+    return ApolloDuoBookCoordinatorIsUp();
+}
+
+static void ApolloDuoBookScheduleSettledSync(unsigned gen) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.40 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (gen != sApolloDuoBookSizeTransitionGen) return;
+        if (sApolloDuoBookSizeTransitionCount > 0) return;
+        if (ApolloDuoBookCoordinatorIsUp()) {
+            ApolloDuoBookScheduleSettledSync(gen);
+            return;
+        }
+        sApolloDuoBookSizeTransitionAt = 0.0;
+        ApolloDuoBookSync();
+    });
+}
+
+void ApolloDuoBookBeginSizeTransition(void) {
+    sApolloDuoBookSizeTransitionCount++;
+    sApolloDuoBookSizeTransitionAt = CFAbsoluteTimeGetCurrent();
+    unsigned gen = ++sApolloDuoBookSizeTransitionGen;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.25 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (gen != sApolloDuoBookSizeTransitionGen) return;
+        if (sApolloDuoBookSizeTransitionCount <= 0) return;
+        sApolloDuoBookSizeTransitionCount = 0;
+        ApolloDuoBookSync();
+    });
+}
+
+void ApolloDuoBookEndSizeTransition(void) {
+    if (sApolloDuoBookSizeTransitionCount > 0) sApolloDuoBookSizeTransitionCount--;
+    sApolloDuoBookSizeTransitionAt = CFAbsoluteTimeGetCurrent();
+    ApolloDuoBookScheduleSettledSync(sApolloDuoBookSizeTransitionGen);
 }
 
 int ApolloDuoBookShouldApplyFrames(void) {
-    UITabBarController *tabs = ApolloDuoBookTabs();
-    int media = ApolloDuoBookMediaPresenterIsUp() ? 1 : 0;
-    int rotating = (tabs.transitionCoordinator != nil) ? 1 : 0;
-    return ApolloDuoBookShouldWriteFrames(media || rotating, sApolloDuoBookApplying ? 1 : 0);
+    return ApolloDuoBookShouldWriteFrames(ApolloDuoBookOverlayIsUp() ? 1 : 0,
+                                          ApolloDuoBookSizeTransitionIsUp() ? 1 : 0,
+                                          sApolloDuoBookApplying ? 1 : 0);
 }
 
 static UITabBarController *ApolloDuoBookTabs(void) {
@@ -162,6 +244,73 @@ static BOOL ApolloDuoBookIsCommentsController(UIViewController *controller) {
     return name && strstr(name, "CommentsViewController") != NULL
         && strstr(name, "SavedPosts") == NULL
         && strstr(name, "UserComments") == NULL;
+}
+
+static NSString *ApolloDuoBookNormalizedPostKey(NSString *raw) {
+    if (![raw isKindOfClass:[NSString class]] || raw.length == 0) return nil;
+    NSString *key = raw.lowercaseString;
+    if ([key hasPrefix:@"t3_"]) return key;
+    return [@"t3_" stringByAppendingString:key];
+}
+
+static NSString *ApolloDuoBookPostKey(UIViewController *comments) {
+    if (!comments) return nil;
+    id link = ApolloCommentsVCLink(comments);
+    if (link) {
+        SEL selectors[] = { @selector(fullName), @selector(identifier), @selector(name) };
+        for (unsigned i = 0; i < sizeof(selectors) / sizeof(selectors[0]); i++) {
+            if (![link respondsToSelector:selectors[i]]) continue;
+            id value = ((id (*)(id, SEL))objc_msgSend)(link, selectors[i]);
+            NSString *key = ApolloDuoBookNormalizedPostKey(value);
+            if (key) return key;
+        }
+    }
+    @try {
+        NSString *key = ApolloDuoBookNormalizedPostKey([comments valueForKey:@"linkID"]);
+        if (key) return key;
+    } @catch (__unused NSException *exception) {
+    }
+    return nil;
+}
+
+static BOOL ApolloDuoBookAlreadyShows(UITabBarController *tabs, UIViewController *comments) {
+    if (!tabs || !comments) return NO;
+    UIViewController *existing = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailKey);
+    if (existing == comments) return YES;
+    UIViewController *existingNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
+    UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
+    if (host) {
+        UIViewController *walk = comments.parentViewController;
+        while (walk) {
+            if (walk == host || walk == existingNav) return YES;
+            walk = walk.parentViewController;
+        }
+    }
+    if (existingNav.parentViewController == host) {
+        if ([existingNav isKindOfClass:[UINavigationController class]]
+            && [[(UINavigationController *)existingNav viewControllers] containsObject:comments]) {
+            return YES;
+        }
+        NSString *have = objc_getAssociatedObject(tabs, &kApolloDuoBookPostKeyKey);
+        NSString *want = ApolloDuoBookPostKey(comments);
+        if (have.length > 0 && want.length > 0 && [have isEqualToString:want]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static void ApolloDuoBookRememberPending(UITabBarController *tabs, UIViewController *comments) {
+    if (!tabs || !comments) return;
+    objc_setAssociatedObject(tabs, &kApolloDuoBookPendingKey, comments,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static UIViewController *ApolloDuoBookTakePending(UITabBarController *tabs) {
+    UIViewController *pending = objc_getAssociatedObject(tabs, &kApolloDuoBookPendingKey);
+    objc_setAssociatedObject(tabs, &kApolloDuoBookPendingKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return pending;
 }
 
 static UINavigationController *ApolloDuoBookFindPostsNav(UITabBarController *tabs) {
@@ -350,6 +499,10 @@ static void ApolloDuoBookBringChromeFront(UITabBarController *tabs) {
     if (host.view.superview == tabs.view) {
         [tabs.view bringSubviewToFront:host.view];
     }
+    UIView *gap = objc_getAssociatedObject(tabs, &kApolloDuoBookGapKey);
+    if (gap.superview == tabs.view) {
+        [tabs.view bringSubviewToFront:gap];
+    }
     for (UIView *subview in tabs.view.subviews) {
         const char *name = class_getName(subview.class);
         if (name && strstr(name, "ApolloDuoRail")) {
@@ -357,6 +510,50 @@ static void ApolloDuoBookBringChromeFront(UITabBarController *tabs) {
             break;
         }
     }
+}
+
+static void ApolloDuoBookRemoveGap(UITabBarController *tabs) {
+    UIView *gap = objc_getAssociatedObject(tabs, &kApolloDuoBookGapKey);
+    [gap removeFromSuperview];
+    objc_setAssociatedObject(tabs, &kApolloDuoBookGapKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void ApolloDuoBookApplyGap(UITabBarController *tabs, CGRect feed, CGRect detail) {
+    if (!tabs.isViewLoaded) return;
+    CGFloat x = CGRectGetMaxX(feed);
+    CGFloat width = CGRectGetMinX(detail) - x;
+    if (width < 1.0) width = (CGFloat)ApolloDuoBookHingeGap;
+    if (width < 1.0) return;
+    UIView *gap = objc_getAssociatedObject(tabs, &kApolloDuoBookGapKey);
+    if (!gap) {
+        gap = [[UIView alloc] initWithFrame:CGRectZero];
+        gap.userInteractionEnabled = NO;
+        gap.clipsToBounds = YES;
+        gap.backgroundColor = [UIColor systemBackgroundColor];
+        UIView *line = [[UIView alloc] initWithFrame:CGRectZero];
+        line.tag = 1;
+        line.backgroundColor = [UIColor separatorColor];
+        line.autoresizingMask = UIViewAutoresizingFlexibleHeight
+            | UIViewAutoresizingFlexibleLeftMargin
+            | UIViewAutoresizingFlexibleRightMargin;
+        [gap addSubview:line];
+        objc_setAssociatedObject(tabs, &kApolloDuoBookGapKey, gap,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    CGRect frame = CGRectMake(x, 0.0, width, CGRectGetHeight(tabs.view.bounds));
+    ApolloDuoBookApplyFrame(gap, frame,
+                            UIViewAutoresizingFlexibleHeight
+                            | UIViewAutoresizingFlexibleLeftMargin
+                            | UIViewAutoresizingFlexibleRightMargin);
+    if (gap.superview != tabs.view) {
+        [tabs.view addSubview:gap];
+    }
+    UIView *line = [gap viewWithTag:1];
+    CGFloat scale = gap.window.screen.scale;
+    if (scale < 1.0) scale = 1.0;
+    CGFloat lineW = 1.0 / scale;
+    line.frame = CGRectMake((width - lineW) * 0.5, 0.0, lineW, frame.size.height);
 }
 
 static void ApolloDuoBookPinLeftContent(UITabBarController *tabs, int mode) {
@@ -433,6 +630,7 @@ static void ApolloDuoBookClearDetail(UITabBarController *tabs, BOOL pushBackOnto
     ApolloDuoBookRestoreSafeInsets(placeholder);
     objc_setAssociatedObject(tabs, &kApolloDuoBookDetailKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(tabs, &kApolloDuoBookDetailNavKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(tabs, &kApolloDuoBookPostKeyKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     if (placeholder && placeholder.parentViewController != host && host) {
         [host addChildViewController:placeholder];
@@ -584,13 +782,17 @@ static void ApolloDuoBookApplyDetailInsets(UIViewController *host) {
 
 static void ApolloDuoBookShowDetail(UITabBarController *tabs, UIViewController *comments) {
     if (!tabs || !comments) return;
-    UIViewController *host = ApolloDuoBookHost(tabs, YES);
-    UIViewController *placeholder = objc_getAssociatedObject(tabs, &kApolloDuoBookPlaceholderKey);
-    UIViewController *existing = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailKey);
-    UIViewController *existingNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
-    if (existing == comments && existingNav.parentViewController == host) {
+    if (ApolloDuoBookAlreadyShows(tabs, comments)) {
         return;
     }
+    if (!ApolloDuoBookShouldApplyFrames()) {
+        ApolloDuoBookRememberPending(tabs, comments);
+        return;
+    }
+
+    UIViewController *host = ApolloDuoBookHost(tabs, YES);
+    UIViewController *placeholder = objc_getAssociatedObject(tabs, &kApolloDuoBookPlaceholderKey);
+    UIViewController *existingNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
 
     if (existingNav) {
         [existingNav willMoveToParentViewController:nil];
@@ -607,6 +809,10 @@ static void ApolloDuoBookShowDetail(UITabBarController *tabs, UIViewController *
     objc_setAssociatedObject(tabs, &kApolloDuoBookDetailKey, comments,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(tabs, &kApolloDuoBookDetailNavKey, wrapped,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(tabs, &kApolloDuoBookPostKeyKey, ApolloDuoBookPostKey(comments),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(tabs, &kApolloDuoBookPendingKey, nil,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [host addChildViewController:wrapped];
     wrapped.view.frame = host.view.bounds;
@@ -631,6 +837,11 @@ static void ApolloDuoBookRestorePostsNav(UITabBarController *tabs) {
 
 static void ApolloDuoBookTearDown(UITabBarController *tabs, const char *why) {
     BOOL wasActive = [objc_getAssociatedObject(tabs, &kApolloDuoBookActiveKey) boolValue];
+    ApolloDuoBookRemoveGap(tabs);
+    // Drop the active flag before unwrap. Otherwise push-back hits
+    // AdoptPush, ShowDetail re-hosts, and the host is then removed
+    // with comments attached to nothing (the rotate freeze loop).
+    objc_setAssociatedObject(tabs, &kApolloDuoBookActiveKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     ApolloDuoBookClearDetail(tabs, YES);
     UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
     if (host) {
@@ -639,7 +850,6 @@ static void ApolloDuoBookTearDown(UITabBarController *tabs, const char *why) {
         [host removeFromParentViewController];
     }
     ApolloDuoBookRestorePostsNav(tabs);
-    objc_setAssociatedObject(tabs, &kApolloDuoBookActiveKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (wasActive) {
         ApolloLog(@"[DuoBook] torn down (%s) — stock single-pane restored", why ?: "closed");
     }
@@ -678,6 +888,9 @@ static void ApolloDuoBookApplyFrames(UITabBarController *tabs, int mode) {
     }
     ApolloDuoBookApplyDetailInsets(host);
 
+    CGRect feedFrame = CGRectMake((CGFloat)frames.feed.x, (CGFloat)frames.feed.y,
+                                  (CGFloat)frames.feed.width, (CGFloat)frames.feed.height);
+    ApolloDuoBookApplyGap(tabs, feedFrame, detailFrame);
     ApolloDuoBookPinLeftContent(tabs, mode);
     ApolloDuoBookBringChromeFront(tabs);
     sApolloDuoBookApplying = NO;
@@ -715,6 +928,10 @@ BOOL ApolloDuoBookAdoptPush(UINavigationController *nav, UIViewController *viewC
     if (nav != posts) return NO;
     if (!ApolloDuoBookIsCommentsController(viewController)) return NO;
 
+    if (ApolloDuoBookAlreadyShows(tabs, viewController)) {
+        return YES;
+    }
+
     BOOL feedOnStack = NO;
     for (UIViewController *vc in nav.viewControllers) {
         if (ApolloDuoBookIsFeedController(vc)) {
@@ -727,8 +944,13 @@ BOOL ApolloDuoBookAdoptPush(UINavigationController *nav, UIViewController *viewC
         return NO;
     }
 
+    // Host here only. Never Sync from a push — Sync during a rotate
+    // TearDowns (why=closed) and the unwrap push re-enters AdoptPush.
+    if (!ApolloDuoBookShouldApplyFrames()) {
+        ApolloDuoBookRememberPending(tabs, viewController);
+        return YES;
+    }
     ApolloDuoBookShowDetail(tabs, viewController);
-    ApolloDuoBookSync();
     return YES;
 }
 
@@ -748,7 +970,7 @@ void ApolloDuoBookSync(void) {
     }
 
     if (!ApolloDuoBookShouldApplyFrames()) {
-        const char *why = ApolloDuoBookMediaPresenterIsUp() ? "media" : "transition";
+        const char *why = ApolloDuoBookOverlayIsUp() ? "overlay" : "transition";
         ApolloDuoBookLogDecision(ApolloDuoCurrentMode(), sApolloDuoBookHingeStatus,
                                  ApolloDuoBookCurrentPosture(),
                                  tabs.view.bounds.size.width,
@@ -795,6 +1017,19 @@ void ApolloDuoBookSync(void) {
                              usable, onPostsTab ? 1 : 0, want ? 1 : 0, hint, why);
 
     if (!want) {
+        BOOL wasActive = [objc_getAssociatedObject(tabs, &kApolloDuoBookActiveKey) boolValue];
+        // Intermediate Closed / narrow bounds during rotate must not
+        // unwrap comments. That push re-enters AdoptPush and re-hosts
+        // every ~250ms (the freeze). Hold the live host until Begin
+        // is older than the settle window, then TearDown once.
+        if (wasActive
+            && sApolloDuoBookSizeTransitionAt > 0.0
+            && (CFAbsoluteTimeGetCurrent() - sApolloDuoBookSizeTransitionAt) < 1.50) {
+            ApolloDuoBookLogDecision(duoMode, sApolloDuoBookHingeStatus, posture,
+                                     usable, onPostsTab ? 1 : 0, 1, hint,
+                                     "transition-hold");
+            return;
+        }
         ApolloDuoBookTearDown(tabs, why);
         return;
     }
@@ -803,6 +1038,10 @@ void ApolloDuoBookSync(void) {
     objc_setAssociatedObject(tabs, &kApolloDuoBookActiveKey, @YES,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     ApolloDuoBookApplyFrames(tabs, frameMode);
+    UIViewController *pending = ApolloDuoBookTakePending(tabs);
+    if (pending) {
+        ApolloDuoBookShowDetail(tabs, pending);
+    }
     if (!wasActive) {
         ApolloLog(@"[DuoBook] shown posture=%d mode=%d hinge=%d hint=%d window=%.0fx%.0f",
                   posture, duoMode, sApolloDuoBookHingeStatus, hint,

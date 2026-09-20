@@ -8,6 +8,10 @@
 // Do not re-enable ApolloFeedSplit's in-nav column pin. This file only
 // intercepts feed → comments pushes and parks the post in the sibling
 // host from ApolloDuoBook.m.
+//
+// Rotate / size-class: Begin/End around every transition so Sync /
+// ApplyFrames / ShowDetail cannot re-enter from layout. Hosting is
+// idempotent — the same comments VC or post is never wrapped again.
 
 #import <UIKit/UIKit.h>
 
@@ -21,28 +25,51 @@
 @interface _TtC6Apollo22ApolloTabBarController : UITabBarController
 @end
 
+static void ApolloDuoBookWatchTransition(id<UIViewControllerTransitionCoordinator> coordinator) {
+    ApolloDuoBookBeginSizeTransition();
+    if (!coordinator) {
+        ApolloDuoBookEndSizeTransition();
+        return;
+    }
+    [coordinator animateAlongsideTransition:nil
+                                 completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        (void)context;
+        ApolloDuoBookEndSizeTransition();
+    }];
+}
+
 %group ApolloDuoBookTabs
 
 %hook _TtC6Apollo22ApolloTabBarController
 
 - (void)setSelectedViewController:(UIViewController *)viewController {
     %orig;
-    ApolloDuoBookSync();
+    if (ApolloDuoBookShouldApplyFrames()) {
+        ApolloDuoBookSync();
+    }
 }
 
 - (void)setSelectedIndex:(NSUInteger)selectedIndex {
     %orig;
-    ApolloDuoBookSync();
+    if (ApolloDuoBookShouldApplyFrames()) {
+        ApolloDuoBookSync();
+    }
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size
        withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    ApolloDuoBookWatchTransition(coordinator);
     %orig;
-    [coordinator animateAlongsideTransition:nil
-                                 completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
-        (void)context;
-        ApolloDuoBookSync();
-    }];
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    %orig;
+    if (!previous) return;
+    if (previous.horizontalSizeClass != self.traitCollection.horizontalSizeClass
+        || previous.verticalSizeClass != self.traitCollection.verticalSizeClass) {
+        ApolloDuoBookBeginSizeTransition();
+        ApolloDuoBookEndSizeTransition();
+    }
 }
 
 %end
@@ -65,6 +92,12 @@
     %orig;
 }
 
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
+    ApolloDuoBookWatchTransition(coordinator);
+    %orig;
+}
+
 %end
 
 %group ApolloDuoBookMedia
@@ -73,7 +106,9 @@
 
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
-    ApolloDuoBookSync();
+    if (ApolloDuoBookShouldApplyFrames()) {
+        ApolloDuoBookSync();
+    }
 }
 
 %end

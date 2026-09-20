@@ -53,16 +53,24 @@ Logs (rate-limited): `[DuoBook] sync mode=… hinge=… posture=… usable=… o
 Left pane = current posts nav (list or feed). Right pane = placeholder
 until a post is selected, then that post’s `CommentsViewController`.
 
-Frames reuse `ApolloFeedSplitFramesMake` (balanced, pin-leading) with
-Open’s leading-rail extra (120pt). The posts nav stays full-window
-(`UITabBarController` resets the selected child’s frame). List/feed
-content is pinned to the left half (`FlexibleHeight|FlexibleRightMargin`);
-the detail host overlays the trailing half (feed pinned ~360pt, rest
-to comments), inset 16pt from the trailing bezel. Hosted comments fill
-the host (no readable-width letterbox). The jump FAB pins to the
-detail pane’s trailing-safe corner. BookSync / frame writes pause
-while a fullscreen media viewer is up or a rotate is in flight — do
-not write from `viewDidLayoutSubviews`. The rail stays in front.
+Frames split around the hinge mid with a **40pt gutter** (half-gap each
+side) so the panes do not bleed across the spine. Open’s leading-rail
+extra (120pt) and a 16pt trailing bezel inset still apply. The posts
+nav stays full-window (`UITabBarController` resets the selected child’s
+frame). List/feed content is pinned to the left half; the detail host
+overlays the trailing half; a hairline gutter view covers the mid strip.
+Hosted comments fill the host (no readable-width letterbox). The jump
+FAB pins to the detail pane’s trailing-safe corner.
+
+BookSync / ApplyFrames / ShowDetail are hard-gated during **any**
+bounds / size-class / rotate transition and while a presented overlay
+(media, composer, reply sheet) is up. Hosting is **idempotent**: the
+same `CommentsViewController` or the same post is never wrapped in a
+fresh `UINavigationController` again. AdoptPush does not call Sync.
+Rail `viewDidLayout` / `traitCollectionDidChange` only reassert frames
+— they do not TearDown + re-host (that loop froze the sim: hosted
+comments every ~250ms + nav-bar size-class asserts). One Sync runs
+after the transition settles. The rail stays in front.
 
 Once the posts nav is the left pane, V1 `ApolloDuoRailFillPaneContent`
 fills the visible feed/list into `nav.bounds` (no second +120 rail

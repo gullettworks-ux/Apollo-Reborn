@@ -159,14 +159,16 @@ int main(void) {
           "Open book extraLeft is the leading rail content inset");
     Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeClosed), 0.0),
           "Closed book extraLeft is 0 (no reserved rail column)");
-    Check(ApolloDuoBookShouldWriteFrames(0, 0),
+    Check(ApolloDuoBookShouldWriteFrames(0, 0, 0),
           "book may write frames when idle");
-    Check(!ApolloDuoBookShouldWriteFrames(1, 0),
-          "book must not write frames while a media presenter is up");
-    Check(!ApolloDuoBookShouldWriteFrames(0, 1),
+    Check(!ApolloDuoBookShouldWriteFrames(1, 0, 0),
+          "book must not write frames while an overlay is up");
+    Check(!ApolloDuoBookShouldWriteFrames(0, 1, 0),
+          "book must not write frames during a size-class / rotate transition");
+    Check(!ApolloDuoBookShouldWriteFrames(0, 0, 1),
           "book must not re-enter ApplyFrames from layout");
-    Check(!ApolloDuoBookShouldWriteFrames(1, 1),
-          "media + in-flight apply both block frame writes");
+    Check(!ApolloDuoBookShouldWriteFrames(1, 1, 1),
+          "overlay + transition + in-flight apply all block frame writes");
 
     Check(Near(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
                (double)ApolloDuoBookDetailTrailingChrome),
@@ -188,8 +190,10 @@ int main(void) {
           "Open feed starts at or after the rail");
     Check(open.feed.x + open.feed.width + 0.5 <= 1133.0 * 0.5,
           "Open feed stays left of the hinge mid");
-    Check(open.detail.x + 0.5 >= 1133.0 * 0.5 + ApolloDuoBookDetailHingeGutter,
-          "Open comments start after the hinge mid plus book hinge gutter");
+    Check(open.detail.x + 0.5 >= 1133.0 * 0.5,
+          "Open comments start after the hinge mid");
+    Check(Near(ApolloDuoBookPaneGap(open), (double)ApolloDuoBookHingeGap),
+          "Open book leaves a 40pt hinge gutter so panes do not bleed");
     Check(Near(open.detail.x + open.detail.width,
                1133.0 - (double)ApolloDuoBookDetailTrailingChrome),
           "Open comments stop before the trailing bezel chrome");
@@ -200,23 +204,27 @@ int main(void) {
           "Open feed does not span the hinge");
     Check(!ApolloFeedSplitRectSpansMidX(open.detail, 1133.0 * 0.5),
           "Open comments do not span the hinge");
-    Check(open.detail.width + 0.5 >= open.feed.width,
-          "Open detail is at least as wide as the pinned feed");
-    Check(open.feed.width + 0.5 <= (double)ApolloDuoBookFeedPinnedWidth + 0.5,
-          "Open feed is pinned (~360) instead of a 50/50 split");
+    Check(open.feed.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
+          "Open feed stays at least 320pt");
+    Check(open.detail.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
+          "Open detail stays at least 320pt");
 
     ApolloFeedSplitFrames sim = ApolloDuoBookFramesForMode(951.0, 430.0,
                                                            ApolloDuoModePhone);
     Check(sim.showsDetail, "951pt Phone-mode book still exposes a right pane");
-    Check(sim.feed.width + 0.5 >= 320.0, "951pt left feed stays usable");
+    Check(sim.feed.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
+          "951pt left feed stays usable");
+    Check(sim.detail.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
+          "951pt right pane stays usable");
+    Check(Near(ApolloDuoBookPaneGap(sim), (double)ApolloDuoBookHingeGap),
+          "951pt book leaves a 40pt hinge gutter");
     Check(sim.detail.x + sim.detail.width + 0.5
               <= 951.0 - (double)ApolloDuoBookDetailCornerGutter + 0.5,
           "951pt right pane clears the trailing corner");
-    Check(sim.detail.width + 0.5 >= sim.feed.width,
-          "951pt detail is wider than the pinned feed");
-    Check(Near(sim.feed.width, (double)ApolloDuoBookFeedPinnedWidth)
-              || sim.feed.width + 0.5 <= (double)ApolloDuoBookFeedPinnedWidth + 0.5,
-          "951pt feed stays at the pinned list width");
+    Check(sim.feed.x + sim.feed.width + 0.5 <= 951.0 * 0.5,
+          "951pt feed stays left of mid");
+    Check(sim.detail.x + 0.5 >= 951.0 * 0.5,
+          "951pt comments stay right of mid");
 
     ApolloFeedSplitFrames mid = ApolloDuoBookFramesForMode(744.0, 1133.0,
                                                            ApolloDuoModeClosed);
@@ -225,6 +233,8 @@ int main(void) {
           "portrait-inner feed stays left of mid");
     Check(mid.detail.x + 0.5 >= 744.0 * 0.5,
           "portrait-inner comments stay right of mid");
+    Check(Near(ApolloDuoBookPaneGap(mid), (double)ApolloDuoBookHingeGap),
+          "portrait-inner book leaves a 40pt hinge gutter");
 
     ApolloFeedSplitFrames empty = ApolloDuoBookFramesMake(400.0, 800.0, 0.0, 0.0);
     Check(empty.showsDetail && empty.feed.width + 0.5 <= 200.0,

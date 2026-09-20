@@ -55,19 +55,26 @@ enum {
 // Book only: pull the detail host off the trailing Duo bezel /
 // rounded corner / glass pill, and off the hinge mid.
 enum {
-    ApolloDuoBookFeedPinnedWidth = 360,     /* list column; rest goes to detail */
-    ApolloDuoBookDetailHingeGutter = 6,     /* past the 12pt split gutter */
+    ApolloDuoBookHingeGap = 40,             /* visible book spine at mid */
+    ApolloDuoBookFeedMinWidth = 320,        /* do not starve the list */
     ApolloDuoBookDetailCornerGutter = 16,   /* bezel / rounded corner */
     ApolloDuoBookDetailTrailingChrome = 16, /* host frame vs window trailing */
     ApolloDuoBookDetailBottomChrome = 16,   /* jump FAB above the corner */
 };
 
-// 0 while a fullscreen media presenter is up or a frame apply is
-// already on the stack — writing from viewDidLayout then re-enters
-// Sync/FillSoon (same hang class as the old rail/fill loop).
-static inline int ApolloDuoBookShouldWriteFrames(int mediaPresented,
+static inline double ApolloDuoBookHingeHalfGap(void) {
+    return (double)ApolloDuoBookHingeGap * 0.5;
+}
+
+// 0 while an overlay (media / composer / reply sheet), a size
+// transition, or a nested ApplyFrames is in flight. Writing from
+// viewDidLayout then re-enters Sync/FillSoon (same hang class as
+// the old rail/fill loop).
+static inline int ApolloDuoBookShouldWriteFrames(int overlayPresented,
+                                                 int sizeTransition,
                                                  int applyInFlight) {
-    if (mediaPresented) return 0;
+    if (overlayPresented) return 0;
+    if (sizeTransition) return 0;
     if (applyInFlight) return 0;
     return 1;
 }
@@ -202,9 +209,9 @@ static inline double ApolloDuoBookJumpMaxY(double paneHeight) {
     return limit > 0.0 ? limit : 0.0;
 }
 
-// Pin the feed to ~360pt (floor 320) and give the rest of the trailing
-// half to comments. Balanced 50/50 left the detail column cramped once
-// chrome/gutter ate space. Placeholder still owns the right pane.
+// Two book pages around mid, with a visible hinge gap. Each column
+// uses its half minus half-gap (floor 320 when the canvas allows).
+// Placeholder still owns the right pane.
 static inline ApolloFeedSplitFrames ApolloDuoBookFramesMake(double containerWidth,
                                                             double containerHeight,
                                                             double extraLeft,
@@ -227,24 +234,24 @@ static inline ApolloFeedSplitFrames ApolloDuoBookFramesMake(double containerWidt
     double end = containerWidth - extraRight;
     if (end < start + 1.0) end = containerWidth;
     double mid = ApolloFeedSplitContainerMidX(containerWidth);
-    double halfGutter = (double)ApolloFeedSplitGutterWidth * 0.5;
-    double maxFeed = mid - halfGutter - start;
-    if (maxFeed < 0.0) maxFeed = 0.0;
-    double feedW = (double)ApolloDuoBookFeedPinnedWidth;
-    if (feedW > maxFeed) feedW = maxFeed;
-    if (feedW + 0.5 < (double)ApolloFeedSplitFeedMinWidth
-        && maxFeed + 0.5 >= (double)ApolloFeedSplitFeedMinWidth) {
-        feedW = (double)ApolloFeedSplitFeedMinWidth;
-        if (feedW > maxFeed) feedW = maxFeed;
-    }
+    double half = ApolloDuoBookHingeHalfGap();
+    double feedEnd = mid - half;
+    double detailStart = mid + half;
+    if (feedEnd < start) feedEnd = start;
+    if (detailStart > end) detailStart = end;
 
     frames.showsDetail = 1;
     frames.feed.x = start;
-    frames.feed.width = feedW > 0.0 ? feedW : 0.0;
-    frames.detail.x = mid + halfGutter + (double)ApolloDuoBookDetailHingeGutter;
-    frames.detail.width = end - frames.detail.x;
+    frames.feed.width = feedEnd - start;
+    if (frames.feed.width < 0.0) frames.feed.width = 0.0;
+    frames.detail.x = detailStart;
+    frames.detail.width = end - detailStart;
     if (frames.detail.width < 0.0) frames.detail.width = 0.0;
     return frames;
+}
+
+static inline double ApolloDuoBookPaneGap(ApolloFeedSplitFrames frames) {
+    return frames.detail.x - (frames.feed.x + frames.feed.width);
 }
 
 static inline ApolloFeedSplitFrames ApolloDuoBookFramesForMode(double containerWidth,

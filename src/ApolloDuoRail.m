@@ -1278,7 +1278,14 @@ void ApolloDuoRailSync(void) {
             ApolloLog(@"[DuoRail] hidden; stock tab bar restored (mode=%d)", mode);
         }
         ApolloDuoSubsChromeApplyToTabs(tabs);
-        ApolloDuoBookSync();
+        // Layout / trait / rotate call RailSync every frame. Full BookSync
+        // here re-hosted comments (the freeze). Only decide when the rail
+        // itself actually changed; otherwise reassert frames if already up.
+        if (wasActive || previousMode != mode) {
+            ApolloDuoBookSync();
+        } else {
+            ApolloDuoBookReassertFrames();
+        }
         return;
     }
 
@@ -1340,7 +1347,11 @@ void ApolloDuoRailSync(void) {
             ApolloDuoRailOpenDefaultDirectory(tabs);
         }
     }
-    ApolloDuoBookSync();
+    if (!wasActive || previousMode != mode) {
+        ApolloDuoBookSync();
+    } else {
+        ApolloDuoBookReassertFrames();
+    }
     ApolloDuoRailFillOpenContent();
     ApolloDuoSubsChromeApplyToTabs(tabs);
 }
