@@ -26,6 +26,7 @@ static char kApolloDuoBookDetailNavKey;
 static char kApolloDuoBookActiveKey;
 static char kApolloDuoBookPostureKey;
 static char kApolloDuoBookSavedNavFrameKey;
+static char kApolloDuoBookSavedSafeInsetsKey;
 
 static int sApolloDuoBookHingeStatus = ApolloDuoHingeUnknown;
 static BOOL sApolloDuoBookHingeInstalled = NO;
@@ -365,6 +366,9 @@ static UIViewController *ApolloDuoBookWrappedDetail(UIViewController *comments) 
     return [[UINavigationController alloc] initWithRootViewController:comments];
 }
 
+static void ApolloDuoBookRestoreSafeInsets(UIViewController *controller);
+static void ApolloDuoBookApplyDetailInsets(UIViewController *host);
+
 static void ApolloDuoBookClearDetail(UITabBarController *tabs, BOOL pushBackOntoPosts) {
     UIViewController *detail = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailKey);
     UIViewController *detailNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
@@ -383,6 +387,10 @@ static void ApolloDuoBookClearDetail(UITabBarController *tabs, BOOL pushBackOnto
         [detailNav.view removeFromSuperview];
         [detailNav removeFromParentViewController];
     }
+    ApolloDuoBookRestoreSafeInsets(detail);
+    ApolloDuoBookRestoreSafeInsets(detailNav);
+    ApolloDuoBookRestoreSafeInsets(host);
+    ApolloDuoBookRestoreSafeInsets(placeholder);
     objc_setAssociatedObject(tabs, &kApolloDuoBookDetailKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(tabs, &kApolloDuoBookDetailNavKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
@@ -400,6 +408,113 @@ static void ApolloDuoBookClearDetail(UITabBarController *tabs, BOOL pushBackOnto
         if (posts && ![posts.viewControllers containsObject:toMove]) {
             [posts pushViewController:toMove animated:NO];
             ApolloLog(@"[DuoBook] tear-down pushed hosted comments back onto the posts nav");
+        }
+    }
+}
+
+static void ApolloDuoBookApplySafeInsets(UIViewController *controller) {
+    if (!controller) return;
+    UIEdgeInsets want = UIEdgeInsetsMake(0.0,
+                                         (CGFloat)ApolloDuoBookDetailSafeLeft(),
+                                         (CGFloat)ApolloDuoBookDetailSafeBottom(),
+                                         (CGFloat)ApolloDuoBookDetailSafeRight());
+    if (!objc_getAssociatedObject(controller, &kApolloDuoBookSavedSafeInsetsKey)) {
+        objc_setAssociatedObject(controller, &kApolloDuoBookSavedSafeInsetsKey,
+                                 [NSValue valueWithUIEdgeInsets:controller.additionalSafeAreaInsets],
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    UIEdgeInsets current = controller.additionalSafeAreaInsets;
+    if (fabs(current.left - want.left) < 0.5
+        && fabs(current.right - want.right) < 0.5
+        && fabs(current.bottom - want.bottom) < 0.5) {
+        return;
+    }
+    controller.additionalSafeAreaInsets = UIEdgeInsetsMake(current.top, want.left,
+                                                           want.bottom, want.right);
+}
+
+static void ApolloDuoBookRestoreSafeInsets(UIViewController *controller) {
+    if (!controller) return;
+    NSValue *saved = objc_getAssociatedObject(controller, &kApolloDuoBookSavedSafeInsetsKey);
+    if (!saved) return;
+    controller.additionalSafeAreaInsets = saved.UIEdgeInsetsValue;
+    objc_setAssociatedObject(controller, &kApolloDuoBookSavedSafeInsetsKey, nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static UIView *ApolloDuoBookFindJumpButton(UIViewController *comments) {
+    if (!comments.isViewLoaded) return nil;
+    Ivar ivar = class_getInstanceVariable(comments.class, "commentJumpButton");
+    UIView *button = ivar ? object_getIvar(comments, ivar) : nil;
+    if ([button isKindOfClass:[UIView class]]) return button;
+
+    UIView *root = comments.view;
+    CGFloat rootW = CGRectGetWidth(root.bounds);
+    CGFloat rootH = CGRectGetHeight(root.bounds);
+    UIView *best = nil;
+    CGFloat bestScore = 0.0;
+    NSMutableArray<UIView *> *stack = [NSMutableArray arrayWithObject:root];
+    NSInteger inspected = 0;
+    while (stack.count > 0 && inspected++ < 120) {
+        UIView *view = stack.lastObject;
+        [stack removeLastObject];
+        for (UIView *subview in view.subviews) {
+            [stack addObject:subview];
+        }
+        if (![view isKindOfClass:[UIControl class]]) continue;
+        CGFloat w = CGRectGetWidth(view.bounds);
+        CGFloat h = CGRectGetHeight(view.bounds);
+        if (w < 36.0 || w > 72.0 || h < 36.0 || h > 72.0) continue;
+        if (fabs(w - h) > 8.0) continue;
+        CGRect inRoot = [root convertRect:view.bounds fromView:view];
+        if (CGRectGetMidX(inRoot) < rootW * 0.55) continue;
+        if (CGRectGetMidY(inRoot) < rootH * 0.55) continue;
+        CGFloat score = CGRectGetMaxX(inRoot) + CGRectGetMaxY(inRoot);
+        if (score > bestScore) {
+            bestScore = score;
+            best = view;
+        }
+    }
+    return best;
+}
+
+static void ApolloDuoBookAdjustJumpButton(UIViewController *comments) {
+    if (!comments) return;
+    const char *name = class_getName(comments.class);
+    if (!name || strstr(name, "CommentsViewController") == NULL) return;
+    UIView *button = ApolloDuoBookFindJumpButton(comments);
+    if (![button isKindOfClass:[UIView class]] || !button.superview) return;
+    UIView *container = button.superview;
+    CGRect frame = button.frame;
+    CGFloat limitX = (CGFloat)ApolloDuoBookJumpMaxX(CGRectGetWidth(container.bounds));
+    CGFloat limitY = (CGFloat)ApolloDuoBookJumpMaxY(CGRectGetHeight(container.bounds));
+    BOOL moved = NO;
+    if (CGRectGetMaxX(frame) > limitX + 0.5) {
+        frame.origin.x -= (CGRectGetMaxX(frame) - limitX);
+        moved = YES;
+    }
+    if (CGRectGetMaxY(frame) > limitY + 0.5) {
+        frame.origin.y -= (CGRectGetMaxY(frame) - limitY);
+        moved = YES;
+    }
+    if (frame.origin.x < 0.0) frame.origin.x = 0.0;
+    if (frame.origin.y < 0.0) frame.origin.y = 0.0;
+    if (moved) button.frame = frame;
+}
+
+static void ApolloDuoBookApplyDetailInsets(UIViewController *host) {
+    if (!host) return;
+    ApolloDuoBookApplySafeInsets(host);
+    for (UIViewController *child in host.childViewControllers) {
+        ApolloDuoBookApplySafeInsets(child);
+        if ([child isKindOfClass:[UINavigationController class]]) {
+            UINavigationController *nav = (UINavigationController *)child;
+            for (UIViewController *page in nav.viewControllers) {
+                ApolloDuoBookApplySafeInsets(page);
+                ApolloDuoBookAdjustJumpButton(page);
+            }
+        } else {
+            ApolloDuoBookAdjustJumpButton(child);
         }
     }
 }
@@ -436,6 +551,7 @@ static void ApolloDuoBookShowDetail(UITabBarController *tabs, UIViewController *
         | UIViewAutoresizingFlexibleHeight;
     [host.view addSubview:wrapped.view];
     [wrapped didMoveToParentViewController:host];
+    ApolloDuoBookApplyDetailInsets(host);
     ApolloLog(@"[DuoBook] hosted %@ in the right pane", NSStringFromClass(comments.class));
 }
 
@@ -494,6 +610,7 @@ static void ApolloDuoBookApplyFrames(UITabBarController *tabs, int mode) {
     if (child.isViewLoaded) {
         ApolloDuoBookApplyFrame(child.view, host.view.bounds, ApolloDuoBookFillMask());
     }
+    ApolloDuoBookApplyDetailInsets(host);
 
     ApolloDuoBookPinLeftContent(tabs, mode);
     ApolloDuoBookBringChromeFront(tabs);

@@ -51,6 +51,18 @@ enum {
     ApolloDuoBookPostureFullyOpen = 3,
 };
 
+// Right-pane chrome. V1 RailChromeRight stays 0 (Closed lists).
+// Book only: pull the detail host off the trailing Duo bezel /
+// rounded corner / glass pill, and off the hinge mid.
+enum {
+    ApolloDuoBookDetailHingeGutter = 8,     /* past the 12pt split gutter */
+    ApolloDuoBookDetailCornerGutter = 20,   /* same floor as Subs chrome */
+    ApolloDuoBookDetailTrailingChrome = 28, /* host frame vs window trailing */
+    ApolloDuoBookDetailBottomChrome = 24,   /* jump FAB above the corner */
+    ApolloDuoBookDetailContentLead = 8,
+    ApolloDuoBookDetailContentTrail = 12,
+};
+
 // Map a UIKit UIHinge.status NSInteger. Out-of-range values are
 // Unknown so a future extra case cannot enable the split by accident.
 static inline int ApolloDuoHingeStatusFromUIKit(int raw) {
@@ -145,14 +157,38 @@ static inline int ApolloDuoBookSplitShouldEnableForWindow(int duoMode,
                                                    width, height, 0);
 }
 
-// Open rail is leading. The right pane is the comments column, not a
-// trailing rail — extraRight stays chrome-only (0 on V1 Closed).
+// Open rail is leading. Book extraRight is trailing bezel chrome
+// only — it does not install a rail and does not change V1 Closed.
 static inline double ApolloDuoBookExtraLeftForMode(int mode) {
     return ApolloDuoRailChromeLeftForMode(mode);
 }
 
 static inline double ApolloDuoBookExtraRightForMode(int mode) {
-    return ApolloDuoRailChromeRightForMode(mode);
+    (void)mode;
+    return (double)ApolloDuoBookDetailTrailingChrome;
+}
+
+static inline double ApolloDuoBookDetailSafeLeft(void) {
+    return (double)ApolloDuoBookDetailContentLead;
+}
+
+static inline double ApolloDuoBookDetailSafeRight(void) {
+    return (double)ApolloDuoBookDetailContentTrail;
+}
+
+static inline double ApolloDuoBookDetailSafeBottom(void) {
+    return (double)ApolloDuoBookDetailBottomChrome;
+}
+
+// Jump FAB maxX / maxY inside the already-inset detail pane.
+static inline double ApolloDuoBookJumpMaxX(double paneWidth) {
+    double limit = paneWidth - (double)ApolloDuoBookDetailCornerGutter;
+    return limit > 0.0 ? limit : 0.0;
+}
+
+static inline double ApolloDuoBookJumpMaxY(double paneHeight) {
+    double limit = paneHeight - (double)ApolloDuoBookDetailBottomChrome;
+    return limit > 0.0 ? limit : 0.0;
 }
 
 // Always tiled + balanced + pinLeading so the empty placeholder still
@@ -161,16 +197,22 @@ static inline ApolloFeedSplitFrames ApolloDuoBookFramesMake(double containerWidt
                                                             double containerHeight,
                                                             double extraLeft,
                                                             double extraRight) {
-    return ApolloFeedSplitFramesMake(containerWidth,
-                                     containerHeight,
-                                     extraLeft,
-                                     extraRight,
-                                     ApolloFeedSplitModeTiled,
-                                     0,
-                                     ApolloFeedSplitTileBalanced,
-                                     0.0,
-                                     0.0,
-                                     1);
+    ApolloFeedSplitFrames frames = ApolloFeedSplitFramesMake(containerWidth,
+                                                             containerHeight,
+                                                             extraLeft,
+                                                             extraRight,
+                                                             ApolloFeedSplitModeTiled,
+                                                             0,
+                                                             ApolloFeedSplitTileBalanced,
+                                                             0.0,
+                                                             0.0,
+                                                             1);
+    if (frames.showsDetail
+        && frames.detail.width > (double)ApolloDuoBookDetailHingeGutter + 1.0) {
+        frames.detail.x += (double)ApolloDuoBookDetailHingeGutter;
+        frames.detail.width -= (double)ApolloDuoBookDetailHingeGutter;
+    }
+    return frames;
 }
 
 static inline ApolloFeedSplitFrames ApolloDuoBookFramesForMode(double containerWidth,

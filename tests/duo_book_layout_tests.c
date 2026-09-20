@@ -159,8 +159,18 @@ int main(void) {
           "Open book extraLeft is the leading rail content inset");
     Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeClosed), 0.0),
           "Closed book extraLeft is 0 (no reserved rail column)");
-    Check(Near(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen), 0.0),
-          "book extraRight is 0 — comments own the trailing half");
+    Check(Near(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
+               (double)ApolloDuoBookDetailTrailingChrome),
+          "book extraRight is the trailing bezel chrome, not a rail");
+    Check(ApolloDuoBookExtraRightForMode(ApolloDuoModePhone)
+              == ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
+          "Phone-mode book (951pt Duo sim) gets the same trailing chrome");
+    Check(ApolloDuoBookJumpMaxX(500.0) + 0.5
+              <= 500.0 - (double)ApolloDuoBookDetailCornerGutter + 0.5,
+          "jump FAB stays inside the detail corner gutter");
+    Check(ApolloDuoBookJumpMaxY(400.0) + 0.5
+              <= 400.0 - (double)ApolloDuoBookDetailBottomChrome + 0.5,
+          "jump FAB stays above the detail bottom chrome");
 
     ApolloFeedSplitFrames open = ApolloDuoBookFramesForMode(1133.0, 744.0,
                                                             ApolloDuoModeOpen);
@@ -169,14 +179,26 @@ int main(void) {
           "Open feed starts at or after the rail");
     Check(open.feed.x + open.feed.width + 0.5 <= 1133.0 * 0.5,
           "Open feed stays left of the hinge mid");
-    Check(open.detail.x + 0.5 >= 1133.0 * 0.5,
-          "Open comments start at or after the hinge mid");
-    Check(Near(open.detail.x + open.detail.width, 1133.0),
-          "Open comments fill to the trailing book edge");
+    Check(open.detail.x + 0.5 >= 1133.0 * 0.5 + ApolloDuoBookDetailHingeGutter,
+          "Open comments start after the hinge mid plus book hinge gutter");
+    Check(Near(open.detail.x + open.detail.width,
+               1133.0 - (double)ApolloDuoBookDetailTrailingChrome),
+          "Open comments stop before the trailing bezel chrome");
+    Check(open.detail.x + open.detail.width + 0.5
+              <= 1133.0 - (double)ApolloDuoBookDetailCornerGutter + 0.5,
+          "Open comments leave at least the Subs-sized corner gutter");
     Check(!ApolloFeedSplitRectSpansMidX(open.feed, 1133.0 * 0.5),
           "Open feed does not span the hinge");
     Check(!ApolloFeedSplitRectSpansMidX(open.detail, 1133.0 * 0.5),
           "Open comments do not span the hinge");
+
+    ApolloFeedSplitFrames sim = ApolloDuoBookFramesForMode(951.0, 430.0,
+                                                           ApolloDuoModePhone);
+    Check(sim.showsDetail, "951pt Phone-mode book still exposes a right pane");
+    Check(sim.feed.width + 0.5 >= 320.0, "951pt left feed stays usable");
+    Check(sim.detail.x + sim.detail.width + 0.5
+              <= 951.0 - (double)ApolloDuoBookDetailCornerGutter + 0.5,
+          "951pt right pane clears the trailing corner");
 
     ApolloFeedSplitFrames mid = ApolloDuoBookFramesForMode(744.0, 1133.0,
                                                            ApolloDuoModeClosed);
