@@ -62,6 +62,10 @@ enum {
     ApolloDuoBookDetailCornerGutter = 16,   /* bezel / rounded corner */
     ApolloDuoBookDetailTrailingChrome = 16, /* host frame vs window trailing */
     ApolloDuoBookDetailBottomChrome = 16,   /* jump FAB above the corner */
+    /* Cell-local only. Inside already-shifted RedditList / feed rows
+       so titles clear the clip edge. Does not move the table, pane,
+       ExtraLeft, safe-area, hinge, or A–Z. */
+    ApolloDuoBookCellLeadingPad = 20,
 };
 
 static inline double ApolloDuoBookHingeHalfGap(void) {
@@ -349,6 +353,14 @@ static inline ApolloDuoRailRect ApolloDuoBookPaneContentFrameAtWindowX(double pa
 static inline ApolloDuoRailRect ApolloDuoBookPaneContentFrame(double paneWidth,
                                                               double paneHeight) {
     return ApolloDuoBookPaneContentFrameAtWindowX(0.0, paneWidth, paneHeight);
+}
+
+static inline double ApolloDuoBookCellLeadingPadValue(void) {
+    return (double)ApolloDuoBookCellLeadingPad;
+}
+
+static inline int ApolloDuoBookCellNeedsLeadingPad(double titleMinX) {
+    return titleMinX + 0.5 < ApolloDuoBookCellLeadingPadValue();
 }
 
 static inline ApolloDuoRailRect ApolloDuoBookHostedLeftContent(double paneX,

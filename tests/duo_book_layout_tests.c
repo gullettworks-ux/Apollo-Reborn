@@ -299,6 +299,13 @@ int main(void) {
           "content trailing edge matches the book pane, not a shrunken column");
     Check(pane.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
           "inset left content stays at least 320pt on a wide Open canvas");
+    Check(ApolloDuoBookCellLeadingPadValue() + 0.5 >= 16.0
+              && ApolloDuoBookCellLeadingPadValue() - 0.5 <= 24.0,
+          "cell-local leading pad is 16–24pt");
+    Check(ApolloDuoBookCellNeedsLeadingPad(0.0),
+          "a title on the clip edge needs the cell-local pad");
+    Check(!ApolloDuoBookCellNeedsLeadingPad(ApolloDuoBookCellLeadingPadValue()),
+          "a title already at the pad does not move again");
     Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeOpen)
                + ApolloDuoBookRailChromeInsetLeftWhenActive()
                + pane.x,

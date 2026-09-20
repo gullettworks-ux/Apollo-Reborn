@@ -68,4 +68,10 @@ void ApolloDuoBookEnsureDetailBack(UIViewController *controller);
 /// the full half-panes; no reserved third column.
 int ApolloDuoBookWantsOpenRail(void);
 
+/// ~16–24pt leading pad on a left-pane RedditList / feed cell so the
+/// first title characters clear the clip edge. No-op unless the book
+/// is up and `cell` is in the left pane. Does not move the table,
+/// pane, hinge, A–Z, or rail.
+void ApolloDuoBookApplyCellLeadingPad(UITableViewCell *cell);
+
 __END_DECLS

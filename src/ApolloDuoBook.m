@@ -904,6 +904,70 @@ static UIBarButtonItem *ApolloDuoBookMakeBackItem(void) {
     return item;
 }
 
+static BOOL ApolloDuoBookCellIsInLeftPane(UITableViewCell *cell) {
+    if (!cell || !ApolloDuoBookIsActive()) return NO;
+    UIResponder *responder = cell;
+    int hops = 0;
+    while (responder && hops++ < 16) {
+        if ([responder isKindOfClass:[UIViewController class]]) {
+            return ApolloDuoBookLeftPaneAllowsClass(class_getName(responder.class))
+                ? YES : NO;
+        }
+        responder = responder.nextResponder;
+    }
+    return NO;
+}
+
+static void ApolloDuoBookNudgeLeadingView(UIView *view, CGFloat pad, CGFloat contentWidth) {
+    if (!view || view.hidden) return;
+    CGRect frame = view.frame;
+    if (CGRectGetWidth(frame) < 8.0 || CGRectGetHeight(frame) < 2.0) return;
+    if (CGRectGetMidX(frame) > contentWidth * 0.55) return;
+    if (!ApolloDuoBookCellNeedsLeadingPad((double)CGRectGetMinX(frame))) return;
+    CGFloat nextX = pad;
+    CGFloat nextW = CGRectGetMaxX(frame) - nextX;
+    if (nextW < 1.0) return;
+    frame.origin.x = nextX;
+    frame.size.width = nextW;
+    view.frame = frame;
+}
+
+void ApolloDuoBookApplyCellLeadingPad(UITableViewCell *cell) {
+    if (!ApolloDuoBookCellIsInLeftPane(cell)) return;
+    CGFloat pad = (CGFloat)ApolloDuoBookCellLeadingPadValue();
+    UIView *content = cell.contentView ?: cell;
+
+    cell.insetsLayoutMarginsFromSafeArea = NO;
+    content.insetsLayoutMarginsFromSafeArea = NO;
+    cell.preservesSuperviewLayoutMargins = NO;
+    content.preservesSuperviewLayoutMargins = NO;
+
+    UIEdgeInsets margins = cell.layoutMargins;
+    if (margins.left + 0.5 < pad) {
+        margins.left = pad;
+        cell.layoutMargins = margins;
+    }
+    UIEdgeInsets contentMargins = content.layoutMargins;
+    if (contentMargins.left + 0.5 < pad) {
+        contentMargins.left = pad;
+        content.layoutMargins = contentMargins;
+    }
+    UIEdgeInsets separator = cell.separatorInset;
+    if (separator.left + 0.5 < pad) {
+        separator.left = pad;
+        cell.separatorInset = separator;
+    }
+
+    CGFloat contentWidth = CGRectGetWidth(content.bounds);
+    if (contentWidth < 1.0) contentWidth = CGRectGetWidth(cell.bounds);
+    ApolloDuoBookNudgeLeadingView(cell.textLabel, pad, contentWidth);
+    ApolloDuoBookNudgeLeadingView(cell.detailTextLabel, pad, contentWidth);
+    ApolloDuoBookNudgeLeadingView(cell.imageView, pad, contentWidth);
+    for (UIView *child in content.subviews) {
+        ApolloDuoBookNudgeLeadingView(child, pad, contentWidth);
+    }
+}
+
 int ApolloDuoBookWantsOpenRail(void) {
     UITabBarController *tabs = ApolloDuoBookTabs();
     CGSize size = CGSizeZero;

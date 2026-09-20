@@ -64,6 +64,9 @@ up:
 - **feed pane** = full left half (x=0 → hinge)
 - **hosted left content** (RedditList / feed / section headers) starts
   after the overlay rail (~120) and still ends at the hinge
+- **cell-local leading pad** (~20pt) on RedditList / feed row
+  contentView / layoutMargins / title leading only — table frame,
+  pane, ExtraLeft, safe-area, hinge, A–Z, and rail stay put
 - **detail** = full right half-pane (16pt trailing bezel chrome only)
 - **no third column**
 

@@ -76,6 +76,50 @@ static void ApolloDuoBookWatchTransition(id<UIViewControllerTransitionCoordinato
 
 %end
 
+%hook UITableViewCell
+
+- (void)layoutSubviews {
+    %orig;
+    ApolloDuoBookApplyCellLeadingPad((UITableViewCell *)self);
+}
+
+- (void)prepareForReuse {
+    %orig;
+    ApolloDuoBookApplyCellLeadingPad((UITableViewCell *)self);
+}
+
+%end
+
+%group ApolloDuoBookRedditList
+
+%hook _TtC6Apollo24RedditListViewController
+
+- (void)tableView:(UITableView *)tableView
+  willDisplayCell:(UITableViewCell *)cell
+forRowAtIndexPath:(NSIndexPath *)indexPath {
+    %orig;
+    ApolloDuoBookApplyCellLeadingPad(cell);
+}
+
+%end
+
+%end
+
+%group ApolloDuoBookPostsList
+
+%hook _TtC6Apollo19PostsViewController
+
+- (void)tableView:(UITableView *)tableView
+  willDisplayCell:(UITableViewCell *)cell
+forRowAtIndexPath:(NSIndexPath *)indexPath {
+    %orig;
+    ApolloDuoBookApplyCellLeadingPad(cell);
+}
+
+%end
+
+%end
+
 %hook UIViewController
 
 - (void)showViewController:(UIViewController *)viewController sender:(id)sender {
@@ -157,6 +201,12 @@ static void ApolloDuoBookWatchTransition(id<UIViewControllerTransitionCoordinato
     Class media = objc_getClass("_TtC6Apollo21MediaViewerController");
     if (media) {
         %init(ApolloDuoBookMedia);
+    }
+    if (objc_getClass("_TtC6Apollo24RedditListViewController")) {
+        %init(ApolloDuoBookRedditList);
+    }
+    if (objc_getClass("_TtC6Apollo19PostsViewController")) {
+        %init(ApolloDuoBookPostsList);
     }
     ApolloLog(@"[DuoBook] hook installed (feed|comments on Open + mid-open book; Closed/Phone stock)");
 }
