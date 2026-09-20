@@ -105,6 +105,7 @@ static CFAbsoluteTime sApolloDuoBookSizeTransitionAt = 0.0;
 
 static UITabBarController *ApolloDuoBookTabs(void);
 static void ApolloDuoBookDetailDidShow(UITabBarController *tabs, UIViewController *controller);
+static void ApolloDuoBookClearDetail(UITabBarController *tabs, BOOL pushBackOntoPosts);
 
 @implementation ApolloDuoBookChrome
 
@@ -172,7 +173,6 @@ static BOOL ApolloDuoBookOverlayIsUp(void) {
 }
 
 static void ApolloDuoBookShowDetail(UITabBarController *tabs, UIViewController *comments);
-static void ApolloDuoBookClearDetail(UITabBarController *tabs, BOOL pushBackOntoPosts);
 static BOOL ApolloDuoBookAlreadyShows(UITabBarController *tabs, UIViewController *comments);
 
 static BOOL ApolloDuoBookCoordinatorIsUp(void) {
