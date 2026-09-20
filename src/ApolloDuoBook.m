@@ -904,23 +904,48 @@ static UIBarButtonItem *ApolloDuoBookMakeBackItem(void) {
     return item;
 }
 
-static BOOL ApolloDuoBookCellIsInLeftPane(UITableViewCell *cell) {
-    if (!cell || !ApolloDuoBookIsActive()) return NO;
+static const char *ApolloDuoBookCellOwnerName(UITableViewCell *cell) {
+    if (!cell) return NULL;
     UIResponder *responder = cell;
     int hops = 0;
     while (responder && hops++ < 16) {
         if ([responder isKindOfClass:[UIViewController class]]) {
-            return ApolloDuoBookLeftPaneAllowsClass(class_getName(responder.class))
-                ? YES : NO;
+            return class_getName(responder.class);
         }
         responder = responder.nextResponder;
     }
-    return NO;
+    return NULL;
 }
 
-static void ApolloDuoBookNudgeLeadingView(UIView *view, CGFloat pad, CGFloat contentWidth) {
-    if (!view || view.hidden) return;
-    CGRect frame = view.frame;
+static UILabel *ApolloDuoBookCellTitleLabel(UITableViewCell *cell) {
+    if (!cell) return nil;
+    if (cell.textLabel && !cell.textLabel.hidden && cell.textLabel.alpha > 0.05) {
+        return cell.textLabel;
+    }
+    static Class listCell = Nil;
+    static Ivar titleIvar = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        listCell = NSClassFromString(@"_TtC6Apollo23RedditListTableViewCell");
+        if (listCell) titleIvar = class_getInstanceVariable(listCell, "redditTitleLabel");
+    });
+    if (!listCell || !titleIvar || ![cell isKindOfClass:listCell]) return nil;
+    id value = object_getIvar(cell, titleIvar);
+    return [value isKindOfClass:[UILabel class]] ? (UILabel *)value : nil;
+}
+
+static BOOL ApolloDuoBookCellIsRedditListOrFeed(UITableViewCell *cell) {
+    if (!cell || !ApolloDuoBookIsActive()) return NO;
+    return ApolloDuoBookCellAllowsLeadingPad(class_getName(cell.class),
+                                             ApolloDuoBookCellOwnerName(cell))
+        ? YES : NO;
+}
+
+// Hang-safe: one title-label frame write. Never walks every subview
+// (stars / accessories / A–Z stay put). Skip when already padded.
+static void ApolloDuoBookNudgeTitleLeading(UILabel *title, CGFloat pad, CGFloat contentWidth) {
+    if (!title || title.hidden) return;
+    CGRect frame = title.frame;
     if (CGRectGetWidth(frame) < 8.0 || CGRectGetHeight(frame) < 2.0) return;
     if (CGRectGetMidX(frame) > contentWidth * 0.55) return;
     if (!ApolloDuoBookCellNeedsLeadingPad((double)CGRectGetMinX(frame))) return;
@@ -929,11 +954,11 @@ static void ApolloDuoBookNudgeLeadingView(UIView *view, CGFloat pad, CGFloat con
     if (nextW < 1.0) return;
     frame.origin.x = nextX;
     frame.size.width = nextW;
-    view.frame = frame;
+    title.frame = frame;
 }
 
 void ApolloDuoBookApplyCellLeadingPad(UITableViewCell *cell) {
-    if (!ApolloDuoBookCellIsInLeftPane(cell)) return;
+    if (!ApolloDuoBookCellIsRedditListOrFeed(cell)) return;
     CGFloat pad = (CGFloat)ApolloDuoBookCellLeadingPadValue();
     UIView *content = cell.contentView ?: cell;
 
@@ -952,20 +977,10 @@ void ApolloDuoBookApplyCellLeadingPad(UITableViewCell *cell) {
         contentMargins.left = pad;
         content.layoutMargins = contentMargins;
     }
-    UIEdgeInsets separator = cell.separatorInset;
-    if (separator.left + 0.5 < pad) {
-        separator.left = pad;
-        cell.separatorInset = separator;
-    }
 
     CGFloat contentWidth = CGRectGetWidth(content.bounds);
     if (contentWidth < 1.0) contentWidth = CGRectGetWidth(cell.bounds);
-    ApolloDuoBookNudgeLeadingView(cell.textLabel, pad, contentWidth);
-    ApolloDuoBookNudgeLeadingView(cell.detailTextLabel, pad, contentWidth);
-    ApolloDuoBookNudgeLeadingView(cell.imageView, pad, contentWidth);
-    for (UIView *child in content.subviews) {
-        ApolloDuoBookNudgeLeadingView(child, pad, contentWidth);
-    }
+    ApolloDuoBookNudgeTitleLeading(ApolloDuoBookCellTitleLabel(cell), pad, contentWidth);
 }
 
 int ApolloDuoBookWantsOpenRail(void) {

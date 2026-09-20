@@ -306,6 +306,34 @@ int main(void) {
           "a title on the clip edge needs the cell-local pad");
     Check(!ApolloDuoBookCellNeedsLeadingPad(ApolloDuoBookCellLeadingPadValue()),
           "a title already at the pad does not move again");
+    Check(Near(ApolloDuoBookCellTitleLeadingAfterPad(0.0),
+               ApolloDuoBookCellLeadingPadValue()),
+          "a flush title moves to the 16–24pt pad");
+    Check(Near(ApolloDuoBookCellTitleLeadingAfterPad(ApolloDuoBookCellLeadingPadValue()),
+               ApolloDuoBookCellLeadingPadValue()),
+          "an already-padded title stays put");
+    Check(ApolloDuoBookCellOwnerAllowsLeadingPad("_TtC6Apollo24RedditListViewController"),
+          "RedditList owns the cell-local pad");
+    Check(ApolloDuoBookCellOwnerAllowsLeadingPad("_TtC6Apollo19PostsViewController"),
+          "the feed owns the cell-local pad");
+    Check(ApolloDuoBookCellOwnerAllowsLeadingPad("_TtC6Apollo23LitePostsViewController"),
+          "lite feed owns the cell-local pad");
+    Check(!ApolloDuoBookCellOwnerAllowsLeadingPad("_TtC6Apollo22CommentsViewController"),
+          "comments do not get the cell-local pad");
+    Check(!ApolloDuoBookCellOwnerAllowsLeadingPad("_TtC6Apollo32SavedPostsCommentsViewController"),
+          "saved-comments is not a RedditList / feed pad owner");
+    Check(ApolloDuoBookCellAllowsLeadingPad("_TtC6Apollo23RedditListTableViewCell",
+                                           "_TtC6Apollo24RedditListViewController"),
+          "RedditList rows take the cell-local pad");
+    Check(ApolloDuoBookCellAllowsLeadingPad("_ASTableViewCell",
+                                           "_TtC6Apollo19PostsViewController"),
+          "feed rows take the cell-local pad");
+    Check(!ApolloDuoBookCellAllowsLeadingPad("_TtC6Apollo23RedditListTableViewCell",
+                                            "_TtC6Apollo22CommentsViewController"),
+          "a list cell on comments does not take the pad");
+    Check(!ApolloDuoBookCellAllowsLeadingPad("UITableViewIndex",
+                                            "_TtC6Apollo24RedditListViewController"),
+          "the A–Z section index does not take the cell-local pad");
     Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeOpen)
                + ApolloDuoBookRailChromeInsetLeftWhenActive()
                + pane.x,

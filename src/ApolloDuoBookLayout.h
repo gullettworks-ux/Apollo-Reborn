@@ -64,7 +64,7 @@ enum {
     ApolloDuoBookDetailBottomChrome = 16,   /* jump FAB above the corner */
     /* Cell-local only. Inside already-shifted RedditList / feed rows
        so titles clear the clip edge. Does not move the table, pane,
-       ExtraLeft, safe-area, hinge, or A–Z. */
+       ExtraLeft, safe-area, hinge, A–Z, or rail. */
     ApolloDuoBookCellLeadingPad = 20,
 };
 
@@ -361,6 +361,41 @@ static inline double ApolloDuoBookCellLeadingPadValue(void) {
 
 static inline int ApolloDuoBookCellNeedsLeadingPad(double titleMinX) {
     return titleMinX + 0.5 < ApolloDuoBookCellLeadingPadValue();
+}
+
+static inline double ApolloDuoBookCellTitleLeadingAfterPad(double titleMinX) {
+    if (!ApolloDuoBookCellNeedsLeadingPad(titleMinX)) return titleMinX;
+    return ApolloDuoBookCellLeadingPadValue();
+}
+
+// Pad owners are RedditList and feed lists only. Comments, media,
+// saved-comments, and every other left-pane visitor stay stock.
+static inline int ApolloDuoBookCellOwnerAllowsLeadingPad(const char *name) {
+    if (!name) return 0;
+    if (strstr(name, "RedditList") != NULL) return 1;
+    if (strstr(name, "LitePostsViewController") != NULL) return 1;
+    if (strstr(name, "PostsViewController") != NULL
+        && strstr(name, "Comments") == NULL) {
+        return 1;
+    }
+    return 0;
+}
+
+// Cell-local pad only. A–Z, comments, media, and unrelated tables
+// never match. Owner is the RedditList / feed controller.
+static inline int ApolloDuoBookCellAllowsLeadingPad(const char *cellName,
+                                                    const char *ownerName) {
+    if (!ApolloDuoBookCellOwnerAllowsLeadingPad(ownerName)) return 0;
+    if (cellName) {
+        if (strstr(cellName, "SectionIndex") != NULL) return 0;
+        if (strstr(cellName, "TableViewIndex") != NULL) return 0;
+        if (strstr(cellName, "Media") != NULL) return 0;
+        if (strstr(cellName, "Comment") != NULL
+            && strstr(cellName, "SavedPosts") == NULL) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static inline ApolloDuoRailRect ApolloDuoBookHostedLeftContent(double paneX,
