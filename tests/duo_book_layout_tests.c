@@ -181,12 +181,28 @@ int main(void) {
     Check(!ApolloDuoBookLeftPaneAllowsClass("_TtC6Apollo26UserCommentsViewController"),
           "user comments stay on the right host");
 
+    Check(ApolloDuoBookWantsOpenRailForCanvas(ApolloDuoModePhone,
+                                             ApolloDuoHingeUnknown,
+                                             951.0, 430.0, 1),
+          "951pt book canvas keeps the Open leading rail");
+    Check(!ApolloDuoBookWantsOpenRailForCanvas(ApolloDuoModePhone,
+                                              ApolloDuoHingeUnknown,
+                                              390.0, 844.0, 1),
+          "phone portrait does not grow an Open rail");
+    Check(ApolloDuoBookWantsOpenRailForCanvas(ApolloDuoModeOpen,
+                                             ApolloDuoHingeUnknown,
+                                             1133.0, 744.0, 0),
+          "fully-open landscape keeps the Open rail beside the book");
+
     Check(Near(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
                (double)ApolloDuoBookDetailTrailingChrome),
           "book extraRight is the trailing bezel chrome, not a rail");
     Check(ApolloDuoBookExtraRightForMode(ApolloDuoModePhone)
               == ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
           "Phone-mode book (951pt Duo sim) gets the same trailing chrome");
+    Check(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen) + 0.5
+              < ApolloDuoRailContentLeftInset(),
+          "Open extraRight is not a second 120pt rail column");
     Check(ApolloDuoBookJumpMaxX(500.0) + 0.5
               <= 500.0 - (double)ApolloDuoBookDetailCornerGutter + 0.5,
           "jump FAB stays inside the detail corner gutter");

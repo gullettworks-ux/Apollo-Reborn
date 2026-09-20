@@ -200,6 +200,18 @@ static inline int ApolloDuoBookSplitShouldEnableForWindow(int duoMode,
                                                    width, height, 0);
 }
 
+// Book-split canvases keep the V1 Open *leading* rail (112pt)
+// even when V1 mode is Phone (~951pt Duo sim). There is never a
+// second / trailing Open rail. Portrait Phone / Closed stay stock.
+static inline int ApolloDuoBookWantsOpenRailForCanvas(int duoMode,
+                                                      int hingeStatus,
+                                                      double width,
+                                                      double height,
+                                                      int duoHint) {
+    return ApolloDuoBookSplitShouldEnableForCanvas(duoMode, hingeStatus,
+                                                   width, height, duoHint);
+}
+
 // Open rail is leading. Book extraRight is trailing bezel chrome
 // only — it does not install a rail and does not change V1 Closed.
 static inline double ApolloDuoBookExtraLeftForMode(int mode) {

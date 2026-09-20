@@ -1174,9 +1174,13 @@ void ApolloDuoRailFillOpenContent(void) {
         if (!top) return;
         const char *topName = class_getName(top.class);
         if (!ApolloDuoBookLeftPaneAllowsClass(topName)) return;
+        int frameMode = (ApolloDuoCurrentMode() == ApolloDuoModeOpen
+                         || ApolloDuoRailIsActive()
+                         || ApolloDuoBookWantsOpenRail())
+            ? ApolloDuoModeOpen : ApolloDuoModePhone;
         ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(tabs.view.bounds.size.width,
                                                                   tabs.view.bounds.size.height,
-                                                                  ApolloDuoCurrentMode());
+                                                                  frameMode);
         CGRect feed = CGRectMake((CGFloat)frames.feed.x, (CGFloat)frames.feed.y,
                                  (CGFloat)frames.feed.width, (CGFloat)frames.feed.height);
         CGRect inNav = [container convertRect:feed fromView:tabs.view];
@@ -1266,7 +1270,14 @@ void ApolloDuoRailSync(void) {
     if (![tabs isKindOfClass:[UITabBarController class]] || !tabs.isViewLoaded) return;
 
     int mode = ApolloDuoRailModeForTabs(tabs);
-    BOOL show = mode == ApolloDuoModeOpen;
+    // Book-split canvases (including ~951pt Phone-mode Duo sim) keep
+    // the V1 Open leading rail. Do not hide it just because the detail
+    // host is installed — host is the right pane, rail stays leading.
+    int chromeMode = mode;
+    if (mode != ApolloDuoModeOpen && ApolloDuoBookWantsOpenRail()) {
+        chromeMode = ApolloDuoModeOpen;
+    }
+    BOOL show = chromeMode == ApolloDuoModeOpen;
     ApolloDuoRailView *rail = objc_getAssociatedObject(tabs, &kApolloDuoRailViewKey);
     BOOL wasActive = [objc_getAssociatedObject(tabs, &kApolloDuoRailActiveKey) boolValue];
     int previousMode = [objc_getAssociatedObject(tabs, &kApolloDuoRailModeKey) intValue];
@@ -1298,7 +1309,7 @@ void ApolloDuoRailSync(void) {
         rail = [[ApolloDuoRailView alloc] initWithFrame:CGRectZero];
         objc_setAssociatedObject(tabs, &kApolloDuoRailViewKey, rail, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    BOOL leading = ApolloDuoModeIsLeading(mode);
+    BOOL leading = ApolloDuoModeIsLeading(chromeMode);
     rail.leading = leading;
     CGRect bounds = tabs.view.bounds;
     UIEdgeInsets safe = ApolloDuoRailSystemSafeInsets(tabs);
@@ -1330,8 +1341,8 @@ void ApolloDuoRailSync(void) {
     }
     [rail apollo_applyTheme];
 
-    CGFloat wantLeft = (CGFloat)ApolloDuoRailChromeLeftForMode(mode);
-    CGFloat wantRight = (CGFloat)ApolloDuoRailChromeRightForMode(mode);
+    CGFloat wantLeft = (CGFloat)ApolloDuoRailChromeLeftForMode(chromeMode);
+    CGFloat wantRight = (CGFloat)ApolloDuoRailChromeRightForMode(chromeMode);
     CGFloat wantBottom = 0.0;
     if (mode == ApolloDuoModeClosed && ApolloDuoCoverShouldApplyForTabs(tabs)) {
         wantBottom = (CGFloat)ApolloDuoCoverPillBottom;
@@ -1339,20 +1350,22 @@ void ApolloDuoRailSync(void) {
     ApolloDuoApplyChromeInsets(tabs, wantLeft, wantBottom, wantRight);
     ApolloDuoRailSetTabBarHidden(tabs, YES);
     objc_setAssociatedObject(tabs, &kApolloDuoRailActiveKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (wasActive && previousMode != mode && previousMode != ApolloDuoModePhone) {
+    if (wasActive && previousMode != chromeMode && previousMode != ApolloDuoModePhone) {
         ApolloDuoRailClearOpenContent();
     }
-    objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!wasActive || previousMode != mode) {
-        ApolloLog(@"[DuoRail] shown %s sidebar (%.0f,%.0f %.0fx%.0f) mode=%d",
+    objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(chromeMode),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!wasActive || previousMode != chromeMode) {
+        ApolloLog(@"[DuoRail] shown %s sidebar (%.0f,%.0f %.0fx%.0f) mode=%d bookRail=%d",
                   leading ? "leading" : "trailing",
-                  frame.x, frame.y, frame.width, frame.height, mode);
+                  frame.x, frame.y, frame.width, frame.height, mode,
+                  chromeMode != mode ? 1 : 0);
         if (!sApolloDuoRailOpenedDefaultDirectory) {
             sApolloDuoRailOpenedDefaultDirectory = YES;
             ApolloDuoRailOpenDefaultDirectory(tabs);
         }
     }
-    if (!wasActive || previousMode != mode) {
+    if (!wasActive || previousMode != chromeMode) {
         ApolloDuoBookSync();
     } else {
         ApolloDuoBookReassertFrames();

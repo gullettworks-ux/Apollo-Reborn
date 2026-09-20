@@ -97,7 +97,7 @@ ApolloReborn_FILES = \
     $(SRC_DIR)/ApolloDeviceReservedRegions.m \
     $(SRC_DIR)/ApolloFeedSplit.xm \
     $(SRC_DIR)/ApolloDuoRail.m \
-    $(SRC_DIR)/ApolloDuoRail.xm \
+    $(SRC_DIR)/ApolloDuoRailHooks.xm \
     $(SRC_DIR)/ApolloDuoSubsChrome.m \
     $(SRC_DIR)/ApolloDuoSubsChrome.xm \
     $(SRC_DIR)/ApolloDuoBook.m \

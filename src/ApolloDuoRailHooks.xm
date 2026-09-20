@@ -1,6 +1,10 @@
 #import "ApolloDuoRail.h"
 #import "ApolloCommon.h"
 
+// Logos hooks for the V1 Open leading rail. Stem is ApolloDuoRailHooks
+// (not ApolloDuoRail) so the Logos generator cannot overwrite
+// src/ApolloDuoRail.m — processed output stays under .theos/.
+
 // Keep the rail attached to Apollo's tab controller across scene activate,
 // rotation, and size-class changes. Open-inner rail is leading and hides
 // the tab bar. Closed portrait Duo and Compact restore the stock tab bar

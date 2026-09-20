@@ -70,7 +70,12 @@ fresh `UINavigationController` again. AdoptPush does not call Sync.
 Rail `viewDidLayout` / `traitCollectionDidChange` only reassert frames
 — they do not TearDown + re-host (that loop froze the sim: hosted
 comments every ~250ms + nav-bar size-class asserts). One Sync runs
-after the transition settles. The rail stays in front.
+after the transition settles. The V1 Open **leading** rail stays in
+front whenever the book canvas is wide enough to split — including
+the ~951pt Duo sim where V1 mode is still Phone. There is no second
+/ trailing rail. Detail comments use `ApolloNavigationController`
+so Apollo’s trailing sort / more / search stay on the right pane,
+plus a pinned back chevron that pops or returns to “Select a post”.
 
 Once the posts nav is the left pane, V1 `ApolloDuoRailFillPaneContent`
 fills the visible feed/list into `nav.bounds` (no second +120 rail

@@ -85,6 +85,16 @@ static void ApolloDuoBookWatchTransition(id<UIViewControllerTransitionCoordinato
     %orig;
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    ApolloDuoBookEnsureDetailBack((UIViewController *)self);
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    ApolloDuoBookEnsureDetailBack((UIViewController *)self);
+}
+
 %end
 
 %hook _TtC6Apollo26ApolloNavigationController
