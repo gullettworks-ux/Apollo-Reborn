@@ -61,9 +61,16 @@ static inline int ApolloDuoHingeStatusFromUIKit(int raw) {
 }
 
 // Window mode wins for fully-open. Duo sim reports UIHinge.status
-// Closed on a wide Open canvas; that must still split. Phone never
-// splits. True Closed portrait (narrow Closed mode) stays single-pane
-// unless the hinge is genuinely partiallyOpen (mid-open book).
+// Closed on a wide Open canvas; that must still split. True Closed
+// portrait stays single-pane unless the hinge is genuinely
+// partiallyOpen (mid-open book).
+//
+// V1 chrome still uses ApolloDuoWideWindowThreshold (1000). Duo sim
+// fully-open inner is ~951pt landscape, so FromBounds returns Phone.
+// Book treats that canvas as FullyOpen when it is landscape, two
+// columns wide, and duoHint is set (glass / hinge class / dual
+// display / rail). Regular iPhone portrait never splits. Regular
+// iPhone landscape without a Duo hint stays Phone.
 static inline int ApolloDuoBookPostureFromState(int duoMode, int hingeStatus) {
     if (duoMode == ApolloDuoModePhone) {
         return ApolloDuoBookPosturePhone;
@@ -80,6 +87,34 @@ static inline int ApolloDuoBookPostureFromState(int duoMode, int hingeStatus) {
     return ApolloDuoBookPostureClosed;
 }
 
+static inline int ApolloDuoBookPostureFromCanvas(int duoMode,
+                                                 int hingeStatus,
+                                                 double width,
+                                                 double height,
+                                                 int duoHint) {
+    int landscape = ApolloDuoIsLandscapeSized(width, height);
+    int twoColumn = width + 0.5 >= (double)ApolloFeedSplitMinRegularWidth;
+    if (duoMode == ApolloDuoModeOpen) {
+        if (hingeStatus == ApolloDuoHingePartiallyOpen) {
+            return ApolloDuoBookPostureMidOpenBook;
+        }
+        return ApolloDuoBookPostureFullyOpen;
+    }
+    if (duoMode == ApolloDuoModeClosed) {
+        if (hingeStatus == ApolloDuoHingePartiallyOpen) {
+            return ApolloDuoBookPostureMidOpenBook;
+        }
+        return ApolloDuoBookPostureClosed;
+    }
+    if (landscape && twoColumn && duoHint) {
+        if (hingeStatus == ApolloDuoHingePartiallyOpen) {
+            return ApolloDuoBookPostureMidOpenBook;
+        }
+        return ApolloDuoBookPostureFullyOpen;
+    }
+    return ApolloDuoBookPosturePhone;
+}
+
 static inline int ApolloDuoBookPostureAllowsSplit(int posture) {
     return posture == ApolloDuoBookPostureMidOpenBook
         || posture == ApolloDuoBookPostureFullyOpen;
@@ -92,13 +127,22 @@ static inline int ApolloDuoBookSplitShouldEnable(int posture, double usableWidth
     return usableWidth + 0.5 >= (double)ApolloFeedSplitMinRegularWidth;
 }
 
+static inline int ApolloDuoBookSplitShouldEnableForCanvas(int duoMode,
+                                                          int hingeStatus,
+                                                          double width,
+                                                          double height,
+                                                          int duoHint) {
+    int posture = ApolloDuoBookPostureFromCanvas(duoMode, hingeStatus,
+                                                 width, height, duoHint);
+    return ApolloDuoBookSplitShouldEnable(posture, width);
+}
+
 static inline int ApolloDuoBookSplitShouldEnableForWindow(int duoMode,
                                                           int hingeStatus,
                                                           double width,
                                                           double height) {
-    int posture = ApolloDuoBookPostureFromState(duoMode, hingeStatus);
-    (void)height;
-    return ApolloDuoBookSplitShouldEnable(posture, width);
+    return ApolloDuoBookSplitShouldEnableForCanvas(duoMode, hingeStatus,
+                                                   width, height, 0);
 }
 
 // Open rail is leading. The right pane is the comments column, not a

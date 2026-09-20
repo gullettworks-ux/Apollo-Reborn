@@ -93,7 +93,38 @@ int main(void) {
     Check(!ApolloDuoBookSplitShouldEnableForWindow(ApolloDuoModePhone,
                                                    ApolloDuoHingeUnknown,
                                                    932.0, 430.0),
-          "Max landscape (not Duo-wide) never splits");
+          "Max landscape without a Duo hint stays single-pane");
+    Check(!ApolloDuoBookSplitShouldEnableForCanvas(ApolloDuoModePhone,
+                                                   ApolloDuoHingeUnknown,
+                                                   390.0, 844.0, 1),
+          "phone portrait stays single-pane even with a Duo hint");
+    Check(!ApolloDuoBookSplitShouldEnableForCanvas(ApolloDuoModePhone,
+                                                   ApolloDuoHingeUnknown,
+                                                   932.0, 430.0, 0),
+          "Max landscape without glass/hinge/dual/rail does not split");
+    Check(ApolloDuoBookSplitShouldEnableForCanvas(ApolloDuoModePhone,
+                                                  ApolloDuoHingeUnknown,
+                                                  951.0, 430.0, 1),
+          "Duo sim ~951pt landscape splits even though V1 mode is Phone");
+    Check(ApolloDuoBookPostureFromCanvas(ApolloDuoModePhone,
+                                         ApolloDuoHingeClosed,
+                                         951.0, 430.0, 1)
+              == ApolloDuoBookPostureFullyOpen,
+          "951pt landscape + Duo hint is FullyOpen under the 1000pt Phone gate");
+    Check(ApolloDuoBookPostureFromCanvas(ApolloDuoModePhone,
+                                         ApolloDuoHingeUnknown,
+                                         390.0, 844.0, 1)
+              == ApolloDuoBookPosturePhone,
+          "phone portrait + Duo hint stays Phone");
+    Check(ApolloDuoBookPostureFromCanvas(ApolloDuoModeClosed,
+                                         ApolloDuoHingeUnknown,
+                                         744.0, 1133.0, 1)
+              == ApolloDuoBookPostureClosed,
+          "portrait Closed stays Closed even with a Duo hint");
+    Check(!ApolloDuoBookSplitShouldEnableForCanvas(ApolloDuoModeClosed,
+                                                   ApolloDuoHingeUnknown,
+                                                   744.0, 1133.0, 1),
+          "portrait Closed never splits");
     Check(!ApolloDuoBookSplitShouldEnableForWindow(ApolloDuoModeClosed,
                                                    ApolloDuoHingeUnknown,
                                                    400.0, 900.0),

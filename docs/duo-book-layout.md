@@ -21,14 +21,15 @@ modified.
 
 | Posture | How it is detected | Split |
 | --- | --- | --- |
-| **Phone** | `ApolloDuoModePhone` (not dual-display, `MAX(w,h) ≤ 1000`) | Never. Hinge reports are ignored. |
+| **Phone** | `ApolloDuoModePhone` **and** portrait, or landscape without a Duo hint | Never. |
 | **Closed** | Portrait-sized Duo window (`ApolloDuoModeClosed`) | Never, unless the hinge is genuinely `partiallyOpen`. |
-| **Fully open** | `ApolloDuoModeOpen` (wide **landscape** window) | Yes, even if `UIHinge.status` is Closed or Unknown. Duo sim reports hinge Closed on a fully-open canvas. |
+| **Fully open** | `ApolloDuoModeOpen`, **or** landscape + usable ≥ 652pt + Duo hint (glass / `UIHingeInteraction` / dual display / rail) while V1 still says Phone (Duo sim inner is ~951pt, below the frozen 1000pt wide gate) | Yes, even if `UIHinge.status` is Closed or Unknown. |
 | **Mid-open book** | `UIHinge.status == partiallyOpen` on a Duo window | Yes, only when usable width ≥ 652pt (two 320pt columns + gutter). A cover-narrow canvas stays single-pane. |
 
-Detection lives in `src/ApolloDuoBookLayout.h` (`ApolloDuoBookPostureFromState`,
-`ApolloDuoBookSplitShouldEnableForWindow`) and is covered by
-`tests/run_duo_book_layout_tests.sh`.
+Detection lives in `src/ApolloDuoBookLayout.h` (`ApolloDuoBookPostureFromCanvas`,
+`ApolloDuoBookSplitShouldEnableForCanvas`) and is covered by
+`tests/run_duo_book_layout_tests.sh`. The frozen V1
+`ApolloDuoWideWindowThreshold` (1000) is not changed.
 
 Runtime hinge install (`src/ApolloDuoBook.m`):
 

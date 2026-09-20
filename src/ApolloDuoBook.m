@@ -36,6 +36,7 @@ static int sApolloDuoBookLastLogHinge = -1;
 static int sApolloDuoBookLastLogPosture = -1;
 static int sApolloDuoBookLastLogWant = -1;
 static int sApolloDuoBookLastLogPosts = -1;
+static int sApolloDuoBookLastLogHint = -1;
 static double sApolloDuoBookLastLogUsable = -1.0;
 static CFAbsoluteTime sApolloDuoBookLastLogAt = 0.0;
 
@@ -142,12 +143,42 @@ static int ApolloDuoBookLiveDuoMode(void) {
     return ApolloDuoModePhone;
 }
 
+static int ApolloDuoBookDuoHint(void) {
+    if (sApolloDuoBookHingeInstalled) return 1;
+    if (objc_getClass("UIHingeInteraction")) return 1;
+    if (ApolloDuoRailIsActive()) return 1;
+    if (IsLiquidGlass()) return 1;
+    CGSize sizes[4];
+    unsigned count = 0;
+    for (UIScreen *screen in [UIScreen screens]) {
+        CGSize size = screen.bounds.size;
+        if (size.width <= 0.0 || size.height <= 0.0) continue;
+        unsigned i;
+        int seen = 0;
+        for (i = 0; i < count; i++) {
+            if (fabs(sizes[i].width - size.width) < 1.0
+                && fabs(sizes[i].height - size.height) < 1.0) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen && count < 4) sizes[count++] = size;
+    }
+    if (count >= 2
+        && ApolloDisplayScreensAreDual(sizes[0].width, sizes[0].height,
+                                       sizes[1].width, sizes[1].height)) {
+        return 1;
+    }
+    return 0;
+}
+
 static void ApolloDuoBookLogDecision(int duoMode,
                                      int hinge,
                                      int posture,
                                      double usable,
                                      int onPostsTab,
                                      int want,
+                                     int hint,
                                      const char *why) {
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
     int changed = (duoMode != sApolloDuoBookLastLogMode)
@@ -155,6 +186,7 @@ static void ApolloDuoBookLogDecision(int duoMode,
         || (posture != sApolloDuoBookLastLogPosture)
         || (want != sApolloDuoBookLastLogWant)
         || (onPostsTab != sApolloDuoBookLastLogPosts)
+        || (hint != sApolloDuoBookLastLogHint)
         || (fabs(usable - sApolloDuoBookLastLogUsable) > 0.5);
     if (!changed && (now - sApolloDuoBookLastLogAt) < 2.0) return;
     sApolloDuoBookLastLogMode = duoMode;
@@ -162,10 +194,11 @@ static void ApolloDuoBookLogDecision(int duoMode,
     sApolloDuoBookLastLogPosture = posture;
     sApolloDuoBookLastLogWant = want;
     sApolloDuoBookLastLogPosts = onPostsTab;
+    sApolloDuoBookLastLogHint = hint;
     sApolloDuoBookLastLogUsable = usable;
     sApolloDuoBookLastLogAt = now;
-    ApolloLog(@"[DuoBook] sync mode=%d hinge=%d posture=%d usable=%.0f onPostsTab=%d want=%d why=%s",
-              duoMode, hinge, posture, usable, onPostsTab, want, why ?: "-");
+    ApolloLog(@"[DuoBook] sync mode=%d hinge=%d posture=%d usable=%.0f onPostsTab=%d want=%d hint=%d why=%s",
+              duoMode, hinge, posture, usable, onPostsTab, want, hint, why ?: "-");
 }
 
 static int ApolloDuoBookMapHingeObject(id hinge) {
@@ -475,8 +508,16 @@ int ApolloDuoBookCurrentPosture(void) {
     UITabBarController *tabs = ApolloDuoBookTabs();
     NSNumber *stored = objc_getAssociatedObject(tabs, &kApolloDuoBookPostureKey);
     if (stored) return stored.intValue;
-    return ApolloDuoBookPostureFromState(ApolloDuoBookLiveDuoMode(),
-                                         sApolloDuoBookHingeStatus);
+    CGSize size = CGSizeZero;
+    if (tabs.isViewLoaded) size = tabs.view.bounds.size;
+    if (size.width < 1.0) {
+        UIWindow *window = ApolloDeviceAppWindow();
+        if (window) size = window.bounds.size;
+    }
+    return ApolloDuoBookPostureFromCanvas(ApolloDuoBookLiveDuoMode(),
+                                          sApolloDuoBookHingeStatus,
+                                          size.width, size.height,
+                                          ApolloDuoBookDuoHint());
 }
 
 int ApolloDuoBookCurrentHingeStatus(void) {
@@ -517,23 +558,27 @@ void ApolloDuoBookSync(void) {
     UITabBarController *tabs = ApolloDuoBookTabs();
     if (!tabs || !tabs.isViewLoaded) {
         ApolloDuoBookLogDecision(ApolloDuoCurrentMode(), sApolloDuoBookHingeStatus,
-                                 ApolloDuoBookPosturePhone, 0.0, 0, 0, "tabs-unready");
+                                 ApolloDuoBookPosturePhone, 0.0, 0, 0, 0, "tabs-unready");
         return;
     }
 
     ApolloDuoBookInstallHinge(tabs.view.window ?: tabs.view);
 
     int duoMode = ApolloDuoBookLiveDuoMode();
-    int posture = ApolloDuoBookPostureFromState(duoMode, sApolloDuoBookHingeStatus);
+    int hint = ApolloDuoBookDuoHint();
     CGSize size = tabs.view.bounds.size;
     UIWindow *window = (tabs.isViewLoaded && tabs.view.window)
         ? tabs.view.window : ApolloDeviceAppWindow();
     if (window && window.bounds.size.width > size.width + 0.5) {
         size = window.bounds.size;
     }
-    double extraLeft = ApolloDuoBookExtraLeftForMode(duoMode);
-    double extraRight = ApolloDuoBookExtraRightForMode(duoMode);
+    int frameMode = (duoMode == ApolloDuoModeOpen || ApolloDuoRailIsActive())
+        ? ApolloDuoModeOpen : ApolloDuoModePhone;
+    double extraLeft = ApolloDuoBookExtraLeftForMode(frameMode);
+    double extraRight = ApolloDuoBookExtraRightForMode(frameMode);
     double usable = ApolloFeedSplitUsableWidth(size.width, extraLeft, extraRight);
+    int posture = ApolloDuoBookPostureFromCanvas(duoMode, sApolloDuoBookHingeStatus,
+                                                 usable, size.height, hint);
     UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
     UINavigationController *selected = ApolloDuoBookNavFromController(tabs.selectedViewController);
     BOOL onPostsTab = posts && selected && (posts == selected
@@ -541,18 +586,18 @@ void ApolloDuoBookSync(void) {
     BOOL wideEnough = ApolloDuoBookSplitShouldEnable(posture, usable) ? YES : NO;
     BOOL want = onPostsTab && wideEnough;
     const char *why = "split";
-    if (duoMode == ApolloDuoModePhone) {
-        why = "phone";
-    } else if (!onPostsTab) {
+    if (!onPostsTab) {
         why = "not-posts-tab";
     } else if (!wideEnough) {
-        why = ApolloDuoBookPostureAllowsSplit(posture) ? "narrow" : "closed";
+        if (posture == ApolloDuoBookPostureClosed) why = "closed";
+        else if (posture == ApolloDuoBookPosturePhone) why = "phone";
+        else why = "narrow";
     }
 
     objc_setAssociatedObject(tabs, &kApolloDuoBookPostureKey, @(posture),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     ApolloDuoBookLogDecision(duoMode, sApolloDuoBookHingeStatus, posture,
-                             usable, onPostsTab ? 1 : 0, want ? 1 : 0, why);
+                             usable, onPostsTab ? 1 : 0, want ? 1 : 0, hint, why);
 
     if (!want) {
         ApolloDuoBookTearDown(tabs, why);
@@ -562,10 +607,10 @@ void ApolloDuoBookSync(void) {
     BOOL wasActive = [objc_getAssociatedObject(tabs, &kApolloDuoBookActiveKey) boolValue];
     objc_setAssociatedObject(tabs, &kApolloDuoBookActiveKey, @YES,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ApolloDuoBookApplyFrames(tabs, duoMode);
+    ApolloDuoBookApplyFrames(tabs, frameMode);
     if (!wasActive) {
-        ApolloLog(@"[DuoBook] shown posture=%d mode=%d hinge=%d window=%.0fx%.0f",
-                  posture, duoMode, sApolloDuoBookHingeStatus,
+        ApolloLog(@"[DuoBook] shown posture=%d mode=%d hinge=%d hint=%d window=%.0fx%.0f",
+                  posture, duoMode, sApolloDuoBookHingeStatus, hint,
                   size.width, size.height);
     }
 }
