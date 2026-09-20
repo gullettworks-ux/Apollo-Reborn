@@ -1168,6 +1168,7 @@ void ApolloDuoRailFillOpenContent(void) {
     // Book overlays the right host and pins list/feed to the left
     // half. Do not run the full-window +120 rail expand.
     if (ApolloDuoBookIsActive()) {
+        if (!ApolloDuoBookShouldApplyFrames()) return;
         ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(tabs.view.bounds.size.width,
                                                                   tabs.view.bounds.size.height,
                                                                   ApolloDuoCurrentMode());
@@ -1176,7 +1177,6 @@ void ApolloDuoRailFillOpenContent(void) {
         CGRect inNav = [container convertRect:feed fromView:tabs.view];
         if (CGRectGetWidth(inNav) < 1.0) inNav = feed;
         ApolloDuoRailFillPaneContentInRect(top, container, inNav);
-        ApolloDuoBookReassertFrames();
         return;
     }
     if (!ApolloDuoRailIsActive()) return;

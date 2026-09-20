@@ -35,12 +35,14 @@
     ApolloDuoBookSync();
 }
 
-- (void)viewDidLayoutSubviews {
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
     %orig;
-    if (!ApolloDuoBookIsActive()) return;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        ApolloDuoBookReassertFrames();
-    });
+    [coordinator animateAlongsideTransition:nil
+                                 completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        (void)context;
+        ApolloDuoBookSync();
+    }];
 }
 
 %end
@@ -65,6 +67,19 @@
 
 %end
 
+%group ApolloDuoBookMedia
+
+%hook _TtC6Apollo21MediaViewerController
+
+- (void)viewDidDisappear:(BOOL)animated {
+    %orig;
+    ApolloDuoBookSync();
+}
+
+%end
+
+%end
+
 %ctor {
     Class nav = objc_getClass("_TtC6Apollo26ApolloNavigationController");
     if (!nav) {
@@ -75,6 +90,10 @@
     Class tabs = objc_getClass("_TtC6Apollo22ApolloTabBarController");
     if (tabs) {
         %init(ApolloDuoBookTabs);
+    }
+    Class media = objc_getClass("_TtC6Apollo21MediaViewerController");
+    if (media) {
+        %init(ApolloDuoBookMedia);
     }
     ApolloLog(@"[DuoBook] hook installed (feed|comments on Open + mid-open book; Closed/Phone stock)");
 }

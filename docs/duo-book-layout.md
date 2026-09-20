@@ -57,11 +57,12 @@ Frames reuse `ApolloFeedSplitFramesMake` (balanced, pin-leading) with
 Open’s leading-rail extra (120pt). The posts nav stays full-window
 (`UITabBarController` resets the selected child’s frame). List/feed
 content is pinned to the left half (`FlexibleHeight|FlexibleRightMargin`);
-the detail host overlays the right half, inset from the hinge gutter
-and trailing bezel (`ApolloDuoBookDetailTrailingChrome` / corner
-gutter) so nav titles, comment chrome, and the jump FAB are not
-clipped. Hosted comments also get `additionalSafeAreaInsets` and a
-V1-style jump-button nudge. The rail stays in front.
+the detail host overlays the trailing half (feed pinned ~360pt, rest
+to comments), inset 16pt from the trailing bezel. Hosted comments fill
+the host (no readable-width letterbox). The jump FAB pins to the
+detail pane’s trailing-safe corner. BookSync / frame writes pause
+while a fullscreen media viewer is up or a rotate is in flight — do
+not write from `viewDidLayoutSubviews`. The rail stays in front.
 
 Once the posts nav is the left pane, V1 `ApolloDuoRailFillPaneContent`
 fills the visible feed/list into `nav.bounds` (no second +120 rail

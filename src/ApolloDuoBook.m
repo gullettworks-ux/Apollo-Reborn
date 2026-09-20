@@ -40,6 +40,7 @@ static int sApolloDuoBookLastLogPosts = -1;
 static int sApolloDuoBookLastLogHint = -1;
 static double sApolloDuoBookLastLogUsable = -1.0;
 static CFAbsoluteTime sApolloDuoBookLastLogAt = 0.0;
+static BOOL sApolloDuoBookApplying = NO;
 
 @interface ApolloDuoBookPlaceholderViewController : UIViewController
 @end
@@ -84,6 +85,45 @@ static CFAbsoluteTime sApolloDuoBookLastLogAt = 0.0;
 }
 
 @end
+
+static UITabBarController *ApolloDuoBookTabs(void);
+
+static BOOL ApolloDuoBookClassLooksLikeMedia(Class cls) {
+    const char *name = cls ? class_getName(cls) : NULL;
+    if (!name) return NO;
+    return strstr(name, "MediaViewer") != NULL
+        || strstr(name, "MediaPage") != NULL
+        || strstr(name, "GalleryViewController") != NULL
+        || strstr(name, "ImageViewer") != NULL;
+}
+
+static BOOL ApolloDuoBookTreeHasMedia(UIViewController *controller, int depth) {
+    if (!controller || depth > 6) return NO;
+    if (ApolloDuoBookClassLooksLikeMedia(controller.class)) return YES;
+    if (controller.presentedViewController
+        && ApolloDuoBookTreeHasMedia(controller.presentedViewController, depth + 1)) {
+        return YES;
+    }
+    return NO;
+}
+
+static BOOL ApolloDuoBookMediaPresenterIsUp(void) {
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    if (ApolloDuoBookTreeHasMedia(tabs, 0)) return YES;
+    UIWindow *window = tabs.view.window ?: ApolloDeviceAppWindow();
+    UIViewController *root = window.rootViewController;
+    if (root && root != (UIViewController *)tabs && ApolloDuoBookTreeHasMedia(root, 0)) {
+        return YES;
+    }
+    return NO;
+}
+
+int ApolloDuoBookShouldApplyFrames(void) {
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    int media = ApolloDuoBookMediaPresenterIsUp() ? 1 : 0;
+    int rotating = (tabs.transitionCoordinator != nil) ? 1 : 0;
+    return ApolloDuoBookShouldWriteFrames(media || rotating, sApolloDuoBookApplying ? 1 : 0);
+}
 
 static UITabBarController *ApolloDuoBookTabs(void) {
     UIViewController *tabs = ApolloMainTabBarController();
@@ -478,28 +518,49 @@ static UIView *ApolloDuoBookFindJumpButton(UIViewController *comments) {
     return best;
 }
 
-static void ApolloDuoBookAdjustJumpButton(UIViewController *comments) {
+static void ApolloDuoBookAdjustJumpButton(UIViewController *comments, UIView *pane) {
     if (!comments) return;
     const char *name = class_getName(comments.class);
     if (!name || strstr(name, "CommentsViewController") == NULL) return;
     UIView *button = ApolloDuoBookFindJumpButton(comments);
     if (![button isKindOfClass:[UIView class]] || !button.superview) return;
     UIView *container = button.superview;
+    UIView *ref = pane ?: comments.view;
     CGRect frame = button.frame;
-    CGFloat limitX = (CGFloat)ApolloDuoBookJumpMaxX(CGRectGetWidth(container.bounds));
-    CGFloat limitY = (CGFloat)ApolloDuoBookJumpMaxY(CGRectGetHeight(container.bounds));
-    BOOL moved = NO;
-    if (CGRectGetMaxX(frame) > limitX + 0.5) {
-        frame.origin.x -= (CGRectGetMaxX(frame) - limitX);
-        moved = YES;
+    CGRect paneBounds = [container convertRect:ref.bounds fromView:ref];
+    CGFloat limitX = (CGFloat)ApolloDuoBookJumpMaxX(CGRectGetMaxX(paneBounds) - CGRectGetMinX(paneBounds));
+    CGFloat limitY = (CGFloat)ApolloDuoBookJumpMaxY(CGRectGetMaxY(paneBounds) - CGRectGetMinY(paneBounds));
+    CGFloat wantX = CGRectGetMinX(paneBounds) + limitX - CGRectGetWidth(frame);
+    CGFloat wantY = CGRectGetMinY(paneBounds) + limitY - CGRectGetHeight(frame);
+    if (wantX < CGRectGetMinX(paneBounds)) wantX = CGRectGetMinX(paneBounds);
+    if (wantY < CGRectGetMinY(paneBounds)) wantY = CGRectGetMinY(paneBounds);
+    if (fabs(frame.origin.x - wantX) < 0.5 && fabs(frame.origin.y - wantY) < 0.5) return;
+    frame.origin.x = wantX;
+    frame.origin.y = wantY;
+    button.frame = frame;
+}
+
+static void ApolloDuoBookFillDetailContent(UIViewController *controller, UIView *container) {
+    if (!controller.isViewLoaded || !container) return;
+    controller.viewRespectsSystemMinimumLayoutMargins = NO;
+    controller.view.insetsLayoutMarginsFromSafeArea = NO;
+    controller.view.layoutMargins = UIEdgeInsetsMake(0.0, 8.0, 0.0, 8.0);
+    CGSize preferred = controller.preferredContentSize;
+    if (fabs(preferred.width - CGRectGetWidth(container.bounds)) > 0.5) {
+        controller.preferredContentSize = container.bounds.size;
     }
-    if (CGRectGetMaxY(frame) > limitY + 0.5) {
-        frame.origin.y -= (CGRectGetMaxY(frame) - limitY);
-        moved = YES;
+    ApolloDuoRailFillPaneContentInRect(controller, container, container.bounds);
+    if ([controller respondsToSelector:@selector(tableView)]) {
+        UITableView *table = nil;
+        @try {
+            table = ((UITableView *(*)(id, SEL))objc_msgSend)(controller, @selector(tableView));
+        } @catch (__unused NSException *exception) {
+            table = nil;
+        }
+        if ([table isKindOfClass:[UITableView class]]) {
+            table.cellLayoutMarginsFollowReadableWidth = NO;
+        }
     }
-    if (frame.origin.x < 0.0) frame.origin.x = 0.0;
-    if (frame.origin.y < 0.0) frame.origin.y = 0.0;
-    if (moved) button.frame = frame;
 }
 
 static void ApolloDuoBookApplyDetailInsets(UIViewController *host) {
@@ -507,14 +568,16 @@ static void ApolloDuoBookApplyDetailInsets(UIViewController *host) {
     ApolloDuoBookApplySafeInsets(host);
     for (UIViewController *child in host.childViewControllers) {
         ApolloDuoBookApplySafeInsets(child);
+        ApolloDuoBookFillDetailContent(child, host.view);
         if ([child isKindOfClass:[UINavigationController class]]) {
             UINavigationController *nav = (UINavigationController *)child;
             for (UIViewController *page in nav.viewControllers) {
                 ApolloDuoBookApplySafeInsets(page);
-                ApolloDuoBookAdjustJumpButton(page);
+                ApolloDuoBookFillDetailContent(page, host.view);
+                ApolloDuoBookAdjustJumpButton(page, host.view);
             }
         } else {
-            ApolloDuoBookAdjustJumpButton(child);
+            ApolloDuoBookAdjustJumpButton(child, host.view);
         }
     }
 }
@@ -584,11 +647,14 @@ static void ApolloDuoBookTearDown(UITabBarController *tabs, const char *why) {
 
 static void ApolloDuoBookApplyFrames(UITabBarController *tabs, int mode) {
     if (!tabs.isViewLoaded) return;
+    if (!ApolloDuoBookShouldApplyFrames()) return;
+    sApolloDuoBookApplying = YES;
     CGRect bounds = tabs.view.bounds;
     ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(bounds.size.width,
                                                               bounds.size.height,
                                                               mode);
     if (!frames.showsDetail || frames.feed.width < 1.0 || frames.detail.width < 1.0) {
+        sApolloDuoBookApplying = NO;
         ApolloDuoBookTearDown(tabs, "frames-unusable");
         return;
     }
@@ -614,6 +680,7 @@ static void ApolloDuoBookApplyFrames(UITabBarController *tabs, int mode) {
 
     ApolloDuoBookPinLeftContent(tabs, mode);
     ApolloDuoBookBringChromeFront(tabs);
+    sApolloDuoBookApplying = NO;
 }
 
 BOOL ApolloDuoBookIsActive(void) {
@@ -668,6 +735,7 @@ BOOL ApolloDuoBookAdoptPush(UINavigationController *nav, UIViewController *viewC
 void ApolloDuoBookReassertFrames(void) {
     UITabBarController *tabs = ApolloDuoBookTabs();
     if (!tabs || !ApolloDuoBookIsActive()) return;
+    if (!ApolloDuoBookShouldApplyFrames()) return;
     ApolloDuoBookApplyFrames(tabs, ApolloDuoBookLiveDuoMode());
 }
 
@@ -676,6 +744,16 @@ void ApolloDuoBookSync(void) {
     if (!tabs || !tabs.isViewLoaded) {
         ApolloDuoBookLogDecision(ApolloDuoCurrentMode(), sApolloDuoBookHingeStatus,
                                  ApolloDuoBookPosturePhone, 0.0, 0, 0, 0, "tabs-unready");
+        return;
+    }
+
+    if (!ApolloDuoBookShouldApplyFrames()) {
+        const char *why = ApolloDuoBookMediaPresenterIsUp() ? "media" : "transition";
+        ApolloDuoBookLogDecision(ApolloDuoCurrentMode(), sApolloDuoBookHingeStatus,
+                                 ApolloDuoBookCurrentPosture(),
+                                 tabs.view.bounds.size.width,
+                                 1, ApolloDuoBookIsActive() ? 1 : 0,
+                                 ApolloDuoBookDuoHint(), why);
         return;
     }
 

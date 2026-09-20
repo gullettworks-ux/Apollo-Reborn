@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- **Duo book layout:** on fully-open landscape Duo and mid-open book posture, the main feed stays on the left and a selected post’s comments open on the right (empty “Select a post” placeholder until then). A landscape canvas that is two-column wide (≥652pt) splits even when V1 chrome still reports Phone because `MAX(w,h) ≤ 1000` (Duo sim fully-open inner is ~951pt). The right pane is inset from the hinge and trailing rounded corner so titles, comment chrome, and the jump FAB are not clipped. Closed portrait Duo and regular iPhone keep the ApolloDuoV1 single-pane path. Hosted comments are pushed back onto the posts stack when the split tears down. First slice is posts-nav feed → `CommentsViewController` only
+- **Duo book layout:** on fully-open landscape Duo and mid-open book posture, the main feed stays on the left and a selected post’s comments open on the right (empty “Select a post” placeholder until then). A landscape canvas that is two-column wide (≥652pt) splits even when V1 chrome still reports Phone because `MAX(w,h) ≤ 1000` (Duo sim fully-open inner is ~951pt). The feed column is pinned (~360pt) so comments get the wider trailing pane; the host clears the bezel without stacking readable-width letterboxing. Book frame writes pause while a fullscreen image/media viewer is up or a rotate is in flight so opening an image and rotating cannot hang. Closed portrait Duo and regular iPhone keep the ApolloDuoV1 single-pane path. Hosted comments are pushed back onto the posts stack when the split tears down. First slice is posts-nav feed → `CommentsViewController` only
 
 ### Build
 

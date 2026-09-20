@@ -159,6 +159,15 @@ int main(void) {
           "Open book extraLeft is the leading rail content inset");
     Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeClosed), 0.0),
           "Closed book extraLeft is 0 (no reserved rail column)");
+    Check(ApolloDuoBookShouldWriteFrames(0, 0),
+          "book may write frames when idle");
+    Check(!ApolloDuoBookShouldWriteFrames(1, 0),
+          "book must not write frames while a media presenter is up");
+    Check(!ApolloDuoBookShouldWriteFrames(0, 1),
+          "book must not re-enter ApplyFrames from layout");
+    Check(!ApolloDuoBookShouldWriteFrames(1, 1),
+          "media + in-flight apply both block frame writes");
+
     Check(Near(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
                (double)ApolloDuoBookDetailTrailingChrome),
           "book extraRight is the trailing bezel chrome, not a rail");
@@ -191,6 +200,10 @@ int main(void) {
           "Open feed does not span the hinge");
     Check(!ApolloFeedSplitRectSpansMidX(open.detail, 1133.0 * 0.5),
           "Open comments do not span the hinge");
+    Check(open.detail.width + 0.5 >= open.feed.width,
+          "Open detail is at least as wide as the pinned feed");
+    Check(open.feed.width + 0.5 <= (double)ApolloDuoBookFeedPinnedWidth + 0.5,
+          "Open feed is pinned (~360) instead of a 50/50 split");
 
     ApolloFeedSplitFrames sim = ApolloDuoBookFramesForMode(951.0, 430.0,
                                                            ApolloDuoModePhone);
@@ -199,6 +212,11 @@ int main(void) {
     Check(sim.detail.x + sim.detail.width + 0.5
               <= 951.0 - (double)ApolloDuoBookDetailCornerGutter + 0.5,
           "951pt right pane clears the trailing corner");
+    Check(sim.detail.width + 0.5 >= sim.feed.width,
+          "951pt detail is wider than the pinned feed");
+    Check(Near(sim.feed.width, (double)ApolloDuoBookFeedPinnedWidth)
+              || sim.feed.width + 0.5 <= (double)ApolloDuoBookFeedPinnedWidth + 0.5,
+          "951pt feed stays at the pinned list width");
 
     ApolloFeedSplitFrames mid = ApolloDuoBookFramesForMode(744.0, 1133.0,
                                                            ApolloDuoModeClosed);

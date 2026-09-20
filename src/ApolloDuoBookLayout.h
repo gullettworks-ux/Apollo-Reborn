@@ -55,13 +55,22 @@ enum {
 // Book only: pull the detail host off the trailing Duo bezel /
 // rounded corner / glass pill, and off the hinge mid.
 enum {
-    ApolloDuoBookDetailHingeGutter = 8,     /* past the 12pt split gutter */
-    ApolloDuoBookDetailCornerGutter = 20,   /* same floor as Subs chrome */
-    ApolloDuoBookDetailTrailingChrome = 28, /* host frame vs window trailing */
-    ApolloDuoBookDetailBottomChrome = 24,   /* jump FAB above the corner */
-    ApolloDuoBookDetailContentLead = 8,
-    ApolloDuoBookDetailContentTrail = 12,
+    ApolloDuoBookFeedPinnedWidth = 360,     /* list column; rest goes to detail */
+    ApolloDuoBookDetailHingeGutter = 6,     /* past the 12pt split gutter */
+    ApolloDuoBookDetailCornerGutter = 16,   /* bezel / rounded corner */
+    ApolloDuoBookDetailTrailingChrome = 16, /* host frame vs window trailing */
+    ApolloDuoBookDetailBottomChrome = 16,   /* jump FAB above the corner */
 };
+
+// 0 while a fullscreen media presenter is up or a frame apply is
+// already on the stack — writing from viewDidLayout then re-enters
+// Sync/FillSoon (same hang class as the old rail/fill loop).
+static inline int ApolloDuoBookShouldWriteFrames(int mediaPresented,
+                                                 int applyInFlight) {
+    if (mediaPresented) return 0;
+    if (applyInFlight) return 0;
+    return 1;
+}
 
 // Map a UIKit UIHinge.status NSInteger. Out-of-range values are
 // Unknown so a future extra case cannot enable the split by accident.
@@ -168,12 +177,14 @@ static inline double ApolloDuoBookExtraRightForMode(int mode) {
     return (double)ApolloDuoBookDetailTrailingChrome;
 }
 
+// Frame already clears the bezel. Do not stack another trailing
+// safe-area inset (that letterboxed the comments column).
 static inline double ApolloDuoBookDetailSafeLeft(void) {
-    return (double)ApolloDuoBookDetailContentLead;
+    return 0.0;
 }
 
 static inline double ApolloDuoBookDetailSafeRight(void) {
-    return (double)ApolloDuoBookDetailContentTrail;
+    return 0.0;
 }
 
 static inline double ApolloDuoBookDetailSafeBottom(void) {
@@ -191,27 +202,48 @@ static inline double ApolloDuoBookJumpMaxY(double paneHeight) {
     return limit > 0.0 ? limit : 0.0;
 }
 
-// Always tiled + balanced + pinLeading so the empty placeholder still
-// owns the right physical pane (Aaron: empty until a post is selected).
+// Pin the feed to ~360pt (floor 320) and give the rest of the trailing
+// half to comments. Balanced 50/50 left the detail column cramped once
+// chrome/gutter ate space. Placeholder still owns the right pane.
 static inline ApolloFeedSplitFrames ApolloDuoBookFramesMake(double containerWidth,
                                                             double containerHeight,
                                                             double extraLeft,
                                                             double extraRight) {
-    ApolloFeedSplitFrames frames = ApolloFeedSplitFramesMake(containerWidth,
-                                                             containerHeight,
-                                                             extraLeft,
-                                                             extraRight,
-                                                             ApolloFeedSplitModeTiled,
-                                                             0,
-                                                             ApolloFeedSplitTileBalanced,
-                                                             0.0,
-                                                             0.0,
-                                                             1);
-    if (frames.showsDetail
-        && frames.detail.width > (double)ApolloDuoBookDetailHingeGutter + 1.0) {
-        frames.detail.x += (double)ApolloDuoBookDetailHingeGutter;
-        frames.detail.width -= (double)ApolloDuoBookDetailHingeGutter;
+    ApolloFeedSplitFrames frames;
+    frames.feed.x = 0.0;
+    frames.feed.y = 0.0;
+    frames.feed.width = 0.0;
+    frames.feed.height = containerHeight > 0.0 ? containerHeight : 0.0;
+    frames.detail.x = 0.0;
+    frames.detail.y = 0.0;
+    frames.detail.width = 0.0;
+    frames.detail.height = containerHeight > 0.0 ? containerHeight : 0.0;
+    frames.showsDetail = 0;
+    if (containerWidth <= 0.0 || containerHeight <= 0.0) return frames;
+
+    if (extraLeft < 0.0) extraLeft = 0.0;
+    if (extraRight < 0.0) extraRight = 0.0;
+    double start = extraLeft;
+    double end = containerWidth - extraRight;
+    if (end < start + 1.0) end = containerWidth;
+    double mid = ApolloFeedSplitContainerMidX(containerWidth);
+    double halfGutter = (double)ApolloFeedSplitGutterWidth * 0.5;
+    double maxFeed = mid - halfGutter - start;
+    if (maxFeed < 0.0) maxFeed = 0.0;
+    double feedW = (double)ApolloDuoBookFeedPinnedWidth;
+    if (feedW > maxFeed) feedW = maxFeed;
+    if (feedW + 0.5 < (double)ApolloFeedSplitFeedMinWidth
+        && maxFeed + 0.5 >= (double)ApolloFeedSplitFeedMinWidth) {
+        feedW = (double)ApolloFeedSplitFeedMinWidth;
+        if (feedW > maxFeed) feedW = maxFeed;
     }
+
+    frames.showsDetail = 1;
+    frames.feed.x = start;
+    frames.feed.width = feedW > 0.0 ? feedW : 0.0;
+    frames.detail.x = mid + halfGutter + (double)ApolloDuoBookDetailHingeGutter;
+    frames.detail.width = end - frames.detail.x;
+    if (frames.detail.width < 0.0) frames.detail.width = 0.0;
     return frames;
 }
 
