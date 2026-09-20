@@ -911,7 +911,8 @@ static BOOL ApolloDuoRailShiftScrollViewOffRail(UIScrollView *scrollView) {
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView) {
     if (!scrollView) return;
     if (ApolloDuoBookIsActive()) {
-        // Overlay rail; pane-local fill only. Never V1 leading inset.
+        // Overlay rail; FillPane already inset the list after ~120.
+        // Do not stack a second window shift or contentInset.left.
         ApolloDuoRailApplyScrollInsetLeft(scrollView, 0.0);
         if (![scrollView isKindOfClass:[UITableView class]]) return;
         UITableView *tableView = (UITableView *)scrollView;
@@ -1185,8 +1186,9 @@ void ApolloDuoRailFillOpenContent(void) {
     UIView *container = nav.view ?: tabs.view;
     UIViewController *top = nav.topViewController;
     if (!top) return;
-    // Book: pin list/feed to the left half-pane. ExtraLeft is 0
-    // (rail overlays). Do not run the V1 full-window +120 expand.
+    // Book: pin list/feed inside the left half-pane, starting after
+    // the overlay rail. ExtraLeft / chrome inset stay 0. Do not run
+    // the V1 full-window +120 expand.
     if (ApolloDuoBookIsActive()) {
         if (!ApolloDuoBookShouldApplyFrames()) return;
         ApolloDuoBookRecoverIfNeeded();
@@ -1202,7 +1204,15 @@ void ApolloDuoRailFillOpenContent(void) {
                                  (CGFloat)frames.feed.width, (CGFloat)frames.feed.height);
         CGRect inNav = [container convertRect:feed fromView:tabs.view];
         if (CGRectGetWidth(inNav) < 1.0) inNav = feed;
-        ApolloDuoRailFillPaneContentInRect(top, container, inNav);
+        ApolloDuoRailRect content = ApolloDuoBookHostedLeftContent(inNav.origin.x,
+                                                                  inNav.origin.y,
+                                                                  inNav.size.width,
+                                                                  inNav.size.height,
+                                                                  frames.feed.x);
+        CGRect want = CGRectMake((CGFloat)content.x, (CGFloat)content.y,
+                                 (CGFloat)content.width, (CGFloat)content.height);
+        ApolloDuoRailFillPaneContentInRect(top, container, want);
+        ApolloDuoSubsChromeApply(top);
         return;
     }
     if (!ApolloDuoRailIsActive()) return;

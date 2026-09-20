@@ -291,12 +291,38 @@ int main(void) {
           "a too-narrow canvas still reports book halves for the math");
 
     ApolloDuoRailRect pane = ApolloDuoBookPaneContentFrame(open.feed.width, 744.0);
-    Check(Near(pane.x, 0.0) && Near(pane.width, open.feed.width),
-          "left-pane children fill the pane, not the full window");
+    Check(Near(pane.x, ApolloDuoRailContentLeftInset()),
+          "hosted left content starts after the overlay rail");
+    Check(Near(pane.width, open.feed.width - ApolloDuoRailContentLeftInset()),
+          "hosted left content still ends at the hinge");
+    Check(Near(pane.x + pane.width, open.feed.width),
+          "content trailing edge matches the book pane, not a shrunken column");
+    Check(pane.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
+          "inset left content stays at least 320pt on a wide Open canvas");
+    Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeOpen)
+               + ApolloDuoBookRailChromeInsetLeftWhenActive()
+               + pane.x,
+               ApolloDuoRailContentLeftInset()),
+          "one ~120pt content offset; book ExtraLeft and chrome inset stay 0");
     Check(!ApolloDuoBookPaneOriginClearsRail(open.feed.x),
           "book left pane starts at 0 — rail overlays, no reserved column");
     Check(!ApolloDuoBookPaneOriginClearsRail(0.0),
           "a full-bleed pane origin is the locked book geometry");
+
+    ApolloDuoRailRect hosted = ApolloDuoBookHostedLeftContent(0.0, 0.0,
+                                                              open.feed.width, 744.0,
+                                                              open.feed.x);
+    Check(Near(hosted.x, ApolloDuoRailContentLeftInset())
+              && Near(hosted.width, pane.width),
+          "hosted content is pane-local: +120 inside the left half");
+
+    ApolloDuoRailRect simContent = ApolloDuoBookPaneContentFrame(sim.feed.width, 430.0);
+    Check(Near(simContent.x, ApolloDuoRailContentLeftInset()),
+          "951pt RedditList content also starts after the overlay rail");
+    Check(Near(simContent.x + simContent.width, sim.feed.width),
+          "951pt list still ends at the hinge");
+    Check(simContent.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
+          "951pt inset list stays usable");
 
     printf("OK: %u checks\n", checks);
     return 0;

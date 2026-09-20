@@ -59,9 +59,11 @@ up:
 
 - **rail** = overlay only (still visible, including ~951pt Phone-mode
   Duo sim via `ApolloDuoBookWantsOpenRail`)
-- **leading inset** = 0 (`ExtraLeft` is 0; `additionalSafeAreaInsets.left`
-  is 0; `FillOpenContent` does not apply V1’s +120 rail inset)
-- **feed** = full left half-pane
+- **book-level leading inset** = 0 (`ExtraLeft` is 0;
+  `additionalSafeAreaInsets.left` is 0 — no stacked book inset)
+- **feed pane** = full left half (x=0 → hinge)
+- **hosted left content** (RedditList / feed / section headers) starts
+  after the overlay rail (~120) and still ends at the hinge
 - **detail** = full right half-pane (16pt trailing bezel chrome only)
 - **no third column**
 
@@ -88,11 +90,11 @@ Detail comments use `ApolloNavigationController` so sort / more / search
 to “Select a post”.
 
 Once the posts nav is the left pane, `ApolloDuoRailFillPaneContentInRect`
-pins the list into the **pane-local** feed rectangle (origin 0 in that
-half, no V1 leading rail inset). Subs chrome (`ApolloDuoSubsChromeApply`)
-then recenters the title / Edit / + on that left pane.
-`ApolloDuoRailFillOpenContent` takes the same pane-local path while the
-book is up.
+pins RedditList / feed content to `ApolloDuoBookHostedLeftContent` (pane
+origin + ~120, trailing edge still the hinge). Subs chrome
+(`ApolloDuoSubsChromeApply`) uses Open title leading while the book is
+up so “Subreddits” / Edit clear the overlay rail even when V1 mode is
+Phone. `ApolloDuoRailFillOpenContent` takes the same pane-local path.
 
 Tap a later post **replaces** the right pane. In-post / nested
 navigation from hosted comments **pushes on the detail nav** — it

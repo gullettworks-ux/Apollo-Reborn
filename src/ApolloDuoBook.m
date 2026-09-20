@@ -668,7 +668,14 @@ static void ApolloDuoBookPinLeftContent(UITabBarController *tabs, int mode) {
     if (CGRectGetWidth(inNav) < 1.0 || CGRectGetHeight(inNav) < 1.0) {
         inNav = feed;
     }
-    ApolloDuoRailFillPaneContentInRect(posts.topViewController, container, inNav);
+    ApolloDuoRailRect content = ApolloDuoBookHostedLeftContent(inNav.origin.x,
+                                                              inNav.origin.y,
+                                                              inNav.size.width,
+                                                              inNav.size.height,
+                                                              frames.feed.x);
+    CGRect want = CGRectMake((CGFloat)content.x, (CGFloat)content.y,
+                             (CGFloat)content.width, (CGFloat)content.height);
+    ApolloDuoRailFillPaneContentInRect(posts.topViewController, container, want);
     ApolloDuoSubsChromeApply(posts.topViewController);
 }
 

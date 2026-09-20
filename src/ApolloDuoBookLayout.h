@@ -320,21 +320,51 @@ static inline ApolloFeedSplitFrames ApolloDuoBookFramesForMode(double containerW
                                    ApolloDuoBookExtraRightForMode(mode));
 }
 
-// Children fill the pane they were given (0,0,paneW,paneH). The
-// book rail is an overlay — do not add V1's +120 leading inset.
-static inline ApolloDuoRailRect ApolloDuoBookPaneContentFrame(double paneWidth,
-                                                              double paneHeight) {
+// 1 when the pane origin is already past the overlay rail.
+static inline int ApolloDuoBookPaneOriginClearsRail(double paneWindowX) {
+    return paneWindowX + 0.5 >= ApolloDuoRailContentLeftInset();
+}
+
+// Hosted left-pane list/header frames (RedditList, feed). When the
+// book pane still starts at the window leading edge, shift content
+// after the overlay rail (~120) and keep the trailing edge on the
+// hinge. Does not change ExtraLeft or additionalSafeAreaInsets.
+static inline ApolloDuoRailRect ApolloDuoBookPaneContentFrameAtWindowX(double paneWindowX,
+                                                                       double paneWidth,
+                                                                       double paneHeight) {
     ApolloDuoRailRect rect;
     rect.x = 0.0;
     rect.y = 0.0;
     rect.width = paneWidth > 0.0 ? paneWidth : 0.0;
     rect.height = paneHeight > 0.0 ? paneHeight : 0.0;
+    if (rect.width < 1.0) return rect;
+    if (ApolloDuoBookPaneOriginClearsRail(paneWindowX)) return rect;
+    double lead = ApolloDuoRailContentLeftInset();
+    if (lead > rect.width) lead = rect.width;
+    rect.x = lead;
+    rect.width -= lead;
     return rect;
 }
 
-// 1 when the pane is already past the rail, so a child at x=0 is clear.
-static inline int ApolloDuoBookPaneOriginClearsRail(double paneWindowX) {
-    return paneWindowX + 0.5 >= ApolloDuoRailContentLeftInset();
+static inline ApolloDuoRailRect ApolloDuoBookPaneContentFrame(double paneWidth,
+                                                              double paneHeight) {
+    return ApolloDuoBookPaneContentFrameAtWindowX(0.0, paneWidth, paneHeight);
+}
+
+static inline ApolloDuoRailRect ApolloDuoBookHostedLeftContent(double paneX,
+                                                              double paneY,
+                                                              double paneWidth,
+                                                              double paneHeight,
+                                                              double paneWindowX) {
+    ApolloDuoRailRect inner = ApolloDuoBookPaneContentFrameAtWindowX(paneWindowX,
+                                                                    paneWidth,
+                                                                    paneHeight);
+    ApolloDuoRailRect out;
+    out.x = paneX + inner.x;
+    out.y = paneY + inner.y;
+    out.width = inner.width;
+    out.height = inner.height;
+    return out;
 }
 
 #ifdef __cplusplus

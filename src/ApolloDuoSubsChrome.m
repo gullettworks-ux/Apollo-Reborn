@@ -2,6 +2,7 @@
 
 #import "ApolloCommon.h"
 #import "ApolloDeviceGeometry.h"
+#import "ApolloDuoBook.h"
 #import "ApolloDuoCompatibility.h"
 #import "ApolloDuoRail.h"
 #import "ApolloDuoRailLayout.h"
@@ -423,6 +424,9 @@ void ApolloDuoSubsChromeApply(UIViewController *controller) {
     }
 
     int mode = ApolloDuoCurrentMode();
+    // Book overlay rail on ~951pt Phone-mode Duo still needs Open
+    // title leading so "Subreddits" / Edit clear Posts/Subs.
+    if (ApolloDuoBookIsActive()) mode = ApolloDuoModeOpen;
     if (!ApolloDuoSubsChromeShouldApply(mode)) {
         ApolloDuoSubsChromeRestore(controller);
         return;
