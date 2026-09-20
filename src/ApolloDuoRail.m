@@ -6,6 +6,7 @@
 #import <string.h>
 
 #import "ApolloCommon.h"
+#import "ApolloDuoBook.h"
 #import "ApolloDuoCompatibility.h"
 #import "ApolloDeviceDisplay.h"
 #import "ApolloDeviceGeometry.h"
@@ -1094,6 +1095,9 @@ static void ApolloDuoRailFillController(UIViewController *controller, UIView *co
 
 void ApolloDuoRailFillOpenContent(void) {
     if (!ApolloDuoRailIsActive()) return;
+    // Book layout owns the posts-nav frame (left pane). Expanding it
+    // here would undo the hinge split and paint the feed under comments.
+    if (ApolloDuoBookIsActive()) return;
     UITabBarController *tabs = (UITabBarController *)ApolloMainTabBarController();
     if (![tabs isKindOfClass:[UITabBarController class]] || !tabs.isViewLoaded) return;
     UINavigationController *nav = ApolloDuoRailNavFromController(tabs.selectedViewController);
@@ -1200,6 +1204,7 @@ void ApolloDuoRailSync(void) {
             ApolloLog(@"[DuoRail] hidden; stock tab bar restored (mode=%d)", mode);
         }
         ApolloDuoSubsChromeApplyToTabs(tabs);
+        ApolloDuoBookSync();
         return;
     }
 
@@ -1263,4 +1268,5 @@ void ApolloDuoRailSync(void) {
         }
     }
     ApolloDuoSubsChromeApplyToTabs(tabs);
+    ApolloDuoBookSync();
 }

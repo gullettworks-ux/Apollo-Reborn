@@ -100,6 +100,8 @@ ApolloReborn_FILES = \
     $(SRC_DIR)/ApolloDuoRail.xm \
     $(SRC_DIR)/ApolloDuoSubsChrome.m \
     $(SRC_DIR)/ApolloDuoSubsChrome.xm \
+    $(SRC_DIR)/ApolloDuoBook.m \
+    $(SRC_DIR)/ApolloDuoBook.xm \
     $(SRC_DIR)/ApolloMediaHinge.xm \
     $(SRC_DIR)/ApolloProfilePagination.xm \
     $(SRC_DIR)/ApolloWebTextDecoding.m \

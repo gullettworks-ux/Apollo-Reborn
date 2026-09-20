@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+
+- **Duo book layout:** on fully-open landscape Duo and mid-open book posture, the main feed stays on the left and a selected post’s comments open on the right (empty “Select a post” placeholder until then). Closed portrait Duo and regular iPhone keep the ApolloDuoV1 single-pane path. Hosted comments are pushed back onto the posts stack when the split tears down. First slice is `PostsViewController` → `CommentsViewController` only
+
 ### Build
 
 - Device Theos builds pin the iOS 27.1 SDK when `iPhoneOS27.1.sdk` is installed, otherwise keep the 26.0 pin; the iOS 14.0 floor is unchanged. Simulator builds stay on `latest`

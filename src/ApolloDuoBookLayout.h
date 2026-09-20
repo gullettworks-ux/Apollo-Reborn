@@ -1,0 +1,143 @@
+#ifndef APOLLO_DUO_BOOK_LAYOUT_H
+#define APOLLO_DUO_BOOK_LAYOUT_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "ApolloDuoCompatibility.h"
+#include "ApolloDuoRailLayout.h"
+#include "ApolloFeedSplitLayout.h"
+
+// Duo "book" two-pane gate + frames. C-only so host tests compile
+// without UIKit.
+//
+// Product (Aaron): split is ON for
+//   1. fully-open landscape (wide inner canvas), and
+//   2. mid-open book (hinge partially open — angled, not shut).
+// Split is OFF for closed portrait Duo and every regular iPhone.
+//
+// Window mode (ApolloDuoModeFromBounds) is still the chrome source:
+//   Phone  — stock tab bar, never split
+//   Closed — portrait-sized Duo window (cover / folded inner)
+//   Open   — wide landscape inner window
+// Hinge status is a *second* signal. UIKit's UIHinge.status is
+// unknown / closed / partiallyOpen / fullyOpen. We never call
+// reservedRegions (SIGSEGV on Duo). Layout does not use hinge
+// *angle* — Apple's guidance is status + size, not radians.
+//
+// When the hinge API is missing (older SDK, non-Duo, worker without
+// the class) status is Unknown. Unknown + Open still enables the
+// split so a landscape Duo sim without UIHingeInteraction is
+// reviewable. Unknown + Closed stays single-pane (V1).
+//
+// Runtime tiling lives in ApolloDuoBook — not ApolloFeedSplit
+// (`ApolloFeedSplitEnabled` stays NO). FeedSplit math is reused
+// only for the column rects.
+
+enum {
+    ApolloDuoHingeUnknown = 0,
+    ApolloDuoHingeClosed = 1,
+    ApolloDuoHingePartiallyOpen = 2,
+    ApolloDuoHingeFullyOpen = 3,
+};
+
+enum {
+    ApolloDuoBookPosturePhone = 0,
+    ApolloDuoBookPostureClosed = 1,
+    ApolloDuoBookPostureMidOpenBook = 2,
+    ApolloDuoBookPostureFullyOpen = 3,
+};
+
+// Map a UIKit UIHinge.status NSInteger. Out-of-range values are
+// Unknown so a future extra case cannot enable the split by accident.
+static inline int ApolloDuoHingeStatusFromUIKit(int raw) {
+    if (raw == ApolloDuoHingeClosed) return ApolloDuoHingeClosed;
+    if (raw == ApolloDuoHingePartiallyOpen) return ApolloDuoHingePartiallyOpen;
+    if (raw == ApolloDuoHingeFullyOpen) return ApolloDuoHingeFullyOpen;
+    return ApolloDuoHingeUnknown;
+}
+
+// Closed hinge always wins: a leftover wide window during fold must
+// tear the split down. Partially-open hinge on a Duo window is the
+// mid-open book even when bounds still look Closed (inner portrait
+// while the hinge is angled). Phone never becomes a book.
+static inline int ApolloDuoBookPostureFromState(int duoMode, int hingeStatus) {
+    if (duoMode == ApolloDuoModePhone) {
+        return ApolloDuoBookPosturePhone;
+    }
+    if (hingeStatus == ApolloDuoHingeClosed) {
+        return ApolloDuoBookPostureClosed;
+    }
+    if (hingeStatus == ApolloDuoHingePartiallyOpen) {
+        return ApolloDuoBookPostureMidOpenBook;
+    }
+    if (duoMode == ApolloDuoModeOpen) {
+        return ApolloDuoBookPostureFullyOpen;
+    }
+    return ApolloDuoBookPostureClosed;
+}
+
+static inline int ApolloDuoBookPostureAllowsSplit(int posture) {
+    return posture == ApolloDuoBookPostureMidOpenBook
+        || posture == ApolloDuoBookPostureFullyOpen;
+}
+
+// Two 320pt columns + gutter. A mid-open cover (phone-narrow) must
+// not split even if the hinge reports partiallyOpen.
+static inline int ApolloDuoBookSplitShouldEnable(int posture, double usableWidth) {
+    if (!ApolloDuoBookPostureAllowsSplit(posture)) return 0;
+    return usableWidth + 0.5 >= (double)ApolloFeedSplitMinRegularWidth;
+}
+
+static inline int ApolloDuoBookSplitShouldEnableForWindow(int duoMode,
+                                                          int hingeStatus,
+                                                          double width,
+                                                          double height) {
+    int posture = ApolloDuoBookPostureFromState(duoMode, hingeStatus);
+    (void)height;
+    return ApolloDuoBookSplitShouldEnable(posture, width);
+}
+
+// Open rail is leading. The right pane is the comments column, not a
+// trailing rail — extraRight stays chrome-only (0 on V1 Closed).
+static inline double ApolloDuoBookExtraLeftForMode(int mode) {
+    return ApolloDuoRailChromeLeftForMode(mode);
+}
+
+static inline double ApolloDuoBookExtraRightForMode(int mode) {
+    return ApolloDuoRailChromeRightForMode(mode);
+}
+
+// Always tiled + balanced + pinLeading so the empty placeholder still
+// owns the right physical pane (Aaron: empty until a post is selected).
+static inline ApolloFeedSplitFrames ApolloDuoBookFramesMake(double containerWidth,
+                                                            double containerHeight,
+                                                            double extraLeft,
+                                                            double extraRight) {
+    return ApolloFeedSplitFramesMake(containerWidth,
+                                     containerHeight,
+                                     extraLeft,
+                                     extraRight,
+                                     ApolloFeedSplitModeTiled,
+                                     0,
+                                     ApolloFeedSplitTileBalanced,
+                                     0.0,
+                                     0.0,
+                                     1);
+}
+
+static inline ApolloFeedSplitFrames ApolloDuoBookFramesForMode(double containerWidth,
+                                                               double containerHeight,
+                                                               int mode) {
+    return ApolloDuoBookFramesMake(containerWidth,
+                                   containerHeight,
+                                   ApolloDuoBookExtraLeftForMode(mode),
+                                   ApolloDuoBookExtraRightForMode(mode));
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

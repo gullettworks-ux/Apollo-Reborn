@@ -7,8 +7,10 @@
 // Compact / cover / ordinary iPhone: this file installs no nav hooks,
 // so stock push/pop and layout stay untouched.
 // Open Duo: ApolloDuoRail is the chrome. Navigation is stock
-// UINavigationController (popToRoot for Subs). Do not reintroduce
-// viewDidLayout re-pinning, SetPrimaryAlongside, or stack surgery.
+// UINavigationController (popToRoot for Subs). Feed | comments on
+// Open + mid-open book is ApolloDuoBook (sibling host), not this file.
+// Do not reintroduce viewDidLayout re-pinning, SetPrimaryAlongside,
+// or stack surgery.
 //
 // UISplitViewController / UIArrangementViewController were considered
 // and rejected for v1 — wrapping a tab's ApolloNavigationController

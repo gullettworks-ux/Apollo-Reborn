@@ -1,0 +1,95 @@
+# Duo book / two-pane layout
+
+First-slice **feed | comments** layout for iPhone Duo. The frozen
+`release/apollo-duo-v1` chrome is unchanged: Closed portrait Duo keeps
+the stock bottom tab bar, Open Duo keeps the leading rail + Subs
+chrome, and regular iPhones stay single-pane.
+
+`ApolloFeedSplitEnabled` stays **NO**. The old Mail-style dual-VC
+host inside one `ApolloNavigationController` (column pins from
+`viewDidLayout`, `SetPrimaryAlongside`, stack surgery) is what
+produced overscroll ghosts and skippy comments scroll. This slice
+hosts comments in a **sibling** of the posts nav instead.
+
+## When the split is on
+
+| Posture | How it is detected | Split |
+| --- | --- | --- |
+| **Phone** | `ApolloDuoModePhone` (not dual-display, `MAX(w,h) ≤ 1000`) | Never. Hinge reports are ignored. |
+| **Closed** | Portrait-sized Duo window, **or** `UIHinge.status == closed` | Never. A leftover wide window during fold still tears down. |
+| **Fully open** | `ApolloDuoModeOpen` (wide **landscape** window) and hinge is not closed | Yes. If `UIHingeInteraction` is missing, Open alone is enough (Duo sim / older SDK). |
+| **Mid-open book** | `UIHinge.status == partiallyOpen` on a Duo window | Yes, only when usable width ≥ 652pt (two 320pt columns + gutter). A cover-narrow canvas stays single-pane. |
+
+Detection lives in `src/ApolloDuoBookLayout.h` (`ApolloDuoBookPostureFromState`,
+`ApolloDuoBookSplitShouldEnableForWindow`) and is covered by
+`tests/run_duo_book_layout_tests.sh`.
+
+Runtime hinge install (`src/ApolloDuoBook.m`):
+
+1. Prefer `UIHingeInteraction` on the tab / window (iOS 27.1 Duo API).
+   `UIHinge.status` maps 1 / 2 / 3 → closed / partiallyOpen / fullyOpen.
+   Out-of-range values are Unknown.
+2. Do **not** call `reservedRegions` (SIGSEGV on Duo).
+3. Do **not** use hinge **angle** for layout (Apple’s guidance: status +
+   size classes, not radians).
+4. If the class is missing, hinge stays Unknown and only fully-open
+   landscape (`ApolloDuoModeOpen`) enables the split.
+
+Logs: `[DuoBook] shown posture=… mode=… hinge=…`,
+`[DuoBook] hosted CommentsViewController…`,
+`[DuoBook] torn down (closed|phone|narrow)`.
+
+## Layout
+
+Left pane = current posts nav (list or feed). Right pane = placeholder
+until a post is selected, then that post’s `CommentsViewController`.
+
+Frames reuse `ApolloFeedSplitFramesMake` (balanced, pin-leading) with
+Open’s leading-rail extra (120pt). The posts nav’s view is resized to
+the left rect; the detail host is a child of the tab controller on the
+right. The rail stays in front. `ApolloDuoRailFillOpenContent` no-ops
+while the book is active so it cannot expand the feed back under the
+comments.
+
+Tap a later post **replaces** the right pane. Closed / Phone tear-down
+unwraps the hosted comments and pushes them onto the posts nav so the
+user is not dropped on a blank feed.
+
+## What this slice does not do
+
+Primary path only: **main `PostsViewController` → `CommentsViewController`**.
+
+Not adopted (stock push, or not intercepted):
+
+- `LitePostsViewController`, search results, saved, inbox, profile
+  comments, `UserCommentsViewController`
+- Swipe-up media comments pane (`ApolloSwipeCommentsIsPaneCommentsController`)
+- URL / floating-tab opens that never pass through the posts nav
+- list \| feed (Subs directory beside a feed) — Open rail + `popToRoot`
+  RedditList is unchanged
+- Comments in the right pane sit in a stock `UINavigationController`
+  (not the tab’s `ApolloNavigationController`), so some Apollo nav-bar
+  chrome / hooks may be missing until a later slice
+
+Wrapping the tab in `UISplitViewController` / `UIArrangementViewController`
+is still rejected (settings, floating tabs, swipe-up, URL routing).
+
+## Verify on a Mac (Duo sim)
+
+```bash
+tests/run_duo_book_layout_tests.sh
+tests/run_duo_compatibility_tests.sh
+tests/run_duo_rail_layout_tests.sh
+tests/run_feed_split_layout_tests.sh
+
+SIM_NAME="Apollo Duo" \
+SIM_DEVICE_TYPE="iPhone Duo" \
+SIM_RUNTIME="iOS 27.1" \
+./scripts/run-in-sim.sh --glass
+```
+
+Expect Open landscape: leading rail, feed on the left, “Select a post”
+on the right, then comments on the right after a Home/Popular/All
+(or subreddit feed) tap. Fold to Closed: host gone, stock tab bar,
+comments on the posts stack if a post was open. Regular iPhone:
+no host, no intercept.

@@ -1,6 +1,7 @@
 #import "ApolloDuoCompatibility.h"
 #import "ApolloDeviceDisplay.h"
 #import "ApolloDeviceGeometry.h"
+#import "ApolloDuoBook.h"
 #import "ApolloDuoRail.h"
 
 #import "ApolloCommon.h"
@@ -59,6 +60,7 @@ void ApolloDuoCompatibilityFillSoon(void) {
         UIWindow *window = ApolloDeviceAppWindow();
         ApolloDeviceFillWindowToActiveCanvas(window);
         ApolloDuoRailSync();
+        ApolloDuoBookSync();
         int dual = ApolloDuoCompatibilityDualDisplays();
         if (window && ApolloDuoModeFromWindow(window, dual) == ApolloDuoModePhone
             && ApolloDuoNeedsCanvasFill(window.bounds.size.width, window.bounds.size.height,
