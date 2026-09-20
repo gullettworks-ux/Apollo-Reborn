@@ -62,9 +62,4 @@ void ApolloDuoBookRecoverIfNeeded(void);
 /// `controller` is not in the right-pane nav.
 void ApolloDuoBookEnsureDetailBack(UIViewController *controller);
 
-/// YES when the live canvas should show the V1 Open *leading* rail
-/// alongside the book split (including ~951pt Phone-mode Duo sim).
-/// Never a second / trailing rail.
-int ApolloDuoBookWantsOpenRail(void);
-
 __END_DECLS

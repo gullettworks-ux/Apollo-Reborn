@@ -154,11 +154,12 @@ int main(void) {
                                                   1133.0, 744.0),
           "wide Open window splits even if the hinge still says Closed");
 
-    Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeOpen),
-               ApolloDuoRailContentLeftInset()),
-          "Open book extraLeft is the leading rail content inset");
+    Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeOpen), 0.0),
+          "Open book extraLeft is 0 (no reserved rail column)");
     Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeClosed), 0.0),
           "Closed book extraLeft is 0 (no reserved rail column)");
+    Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModePhone), 0.0),
+          "Phone-mode book extraLeft is 0 (no reserved rail column)");
     Check(ApolloDuoBookShouldWriteFrames(0, 0, 0),
           "book may write frames when idle");
     Check(!ApolloDuoBookShouldWriteFrames(1, 0, 0),
@@ -181,19 +182,6 @@ int main(void) {
     Check(!ApolloDuoBookLeftPaneAllowsClass("_TtC6Apollo26UserCommentsViewController"),
           "user comments stay on the right host");
 
-    Check(ApolloDuoBookWantsOpenRailForCanvas(ApolloDuoModePhone,
-                                             ApolloDuoHingeUnknown,
-                                             951.0, 430.0, 1),
-          "951pt book canvas keeps the Open leading rail");
-    Check(!ApolloDuoBookWantsOpenRailForCanvas(ApolloDuoModePhone,
-                                              ApolloDuoHingeUnknown,
-                                              390.0, 844.0, 1),
-          "phone portrait does not grow an Open rail");
-    Check(ApolloDuoBookWantsOpenRailForCanvas(ApolloDuoModeOpen,
-                                             ApolloDuoHingeUnknown,
-                                             1133.0, 744.0, 0),
-          "fully-open landscape keeps the Open rail beside the book");
-
     Check(Near(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
                (double)ApolloDuoBookDetailTrailingChrome),
           "book extraRight is the trailing bezel chrome, not a rail");
@@ -213,8 +201,11 @@ int main(void) {
     ApolloFeedSplitFrames open = ApolloDuoBookFramesForMode(1133.0, 744.0,
                                                             ApolloDuoModeOpen);
     Check(open.showsDetail, "Open book always exposes a right pane (placeholder or post)");
-    Check(open.feed.x + 0.5 >= ApolloDuoRailContentLeftInset() - 0.5,
-          "Open feed starts at or after the rail");
+    Check(open.feed.x + 0.5 < 1.0,
+          "Open feed uses the full half-pane; no leading rail column");
+    Check(Near(open.feed.width,
+               1133.0 * 0.5 - ApolloDuoBookHingeHalfGap()),
+          "Open feed is the full left half minus the hinge gutter");
     Check(open.feed.x + open.feed.width + 0.5 <= 1133.0 * 0.5,
           "Open feed stays left of the hinge mid");
     Check(open.detail.x + 0.5 >= 1133.0 * 0.5,
@@ -239,6 +230,8 @@ int main(void) {
     ApolloFeedSplitFrames sim = ApolloDuoBookFramesForMode(951.0, 430.0,
                                                            ApolloDuoModePhone);
     Check(sim.showsDetail, "951pt Phone-mode book still exposes a right pane");
+    Check(sim.feed.x + 0.5 < 1.0,
+          "951pt book feed uses the full half-pane; no rail column");
     Check(sim.feed.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
           "951pt left feed stays usable");
     Check(sim.detail.width + 0.5 >= (double)ApolloDuoBookFeedMinWidth,
@@ -270,10 +263,10 @@ int main(void) {
     ApolloDuoRailRect pane = ApolloDuoBookPaneContentFrame(open.feed.width, 744.0);
     Check(Near(pane.x, 0.0) && Near(pane.width, open.feed.width),
           "left-pane children fill the pane, not the full window");
-    Check(ApolloDuoBookPaneOriginClearsRail(open.feed.x),
-          "Open left-pane origin already clears the rail");
+    Check(!ApolloDuoBookPaneOriginClearsRail(open.feed.x),
+          "book left pane starts at 0 — no reserved rail column");
     Check(!ApolloDuoBookPaneOriginClearsRail(0.0),
-          "a full-bleed pane origin still needs the V1 rail shift");
+          "a full-bleed pane origin is the locked book geometry");
 
     printf("OK: %u checks\n", checks);
     return 0;
