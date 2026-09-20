@@ -24,10 +24,24 @@ void ApolloDuoRailSetPickingSubreddits(BOOL picking);
 /// iOS 14 (missing tab-hide selectors are skipped).
 void ApolloDuoRailSync(void);
 
+/// Posts-tab `ApolloNavigationController` when one exists. Does not
+/// call `goToHomeTab` (that pops RedditList / races a feed push).
+UINavigationController *ApolloDuoRailPostsNavigationController(UITabBarController *tabs);
+
 /// Expand a letterboxed stock-nav column to the usable width. Open
 /// reserves the leading 120pt column. Closed has no rail (stock tab
-/// bar). No midX clamp and no dual-VC hosting.
+/// bar). No midX clamp and no dual-VC hosting. While the book split
+/// is up, fills the top VC into the already-sized left pane (do not
+/// apply the 120pt rail frame a second time).
 void ApolloDuoRailFillOpenContent(void);
+
+/// Fill `controller` to `container.bounds` and re-apply list insets.
+void ApolloDuoRailFillPaneContent(UIViewController *controller, UIView *container);
+
+/// Fill `controller` to `rect` in `container` bounds (book left pane).
+void ApolloDuoRailFillPaneContentInRect(UIViewController *controller,
+                                        UIView *container,
+                                        CGRect rect);
 
 /// Restore full-bleed frames / insets when the rail hides. Walks every
 /// tab nav stack so a leftover leading strip cannot survive Compact

@@ -9,6 +9,7 @@
 #import "ApolloNavigationTitleGeometry.h"
 #import "ApolloNavigationActions.h"
 #import "ApolloNavigationTitlePresentation.h"
+#import "ApolloDuoBook.h"
 #import "ApolloDuoRail.h"
 #import "ApolloDuoRailLayout.h"
 #import "ApolloDuoSubsChrome.h"
@@ -1883,6 +1884,7 @@ static BOOL ApolloRecenterTitleControl(ApolloNavigationTitleGlassController *con
     // chrome. Regular iPhone and non-RedditList screens are unchanged.
     if (ApolloDuoSubsChromeControllerIsRedditList(topVC)) {
         int duoMode = ApolloDuoCurrentMode();
+        if (ApolloDuoBookIsActive()) duoMode = ApolloDuoModeOpen;
         if (ApolloDuoSubsChromeShouldApply(duoMode)) {
             CGFloat barMin = CGRectGetMinX(bar.bounds);
             CGFloat barMax = CGRectGetMaxX(bar.bounds);

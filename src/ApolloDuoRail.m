@@ -6,6 +6,8 @@
 #import <string.h>
 
 #import "ApolloCommon.h"
+#import "ApolloDuoBook.h"
+#import "ApolloDuoBookLayout.h"
 #import "ApolloDuoCompatibility.h"
 #import "ApolloDeviceDisplay.h"
 #import "ApolloDeviceGeometry.h"
@@ -113,6 +115,10 @@ static UINavigationController *ApolloDuoRailFindPostsNav(UITabBarController *tab
         tabs.selectedViewController = best;
     }
     return best;
+}
+
+UINavigationController *ApolloDuoRailPostsNavigationController(UITabBarController *tabs) {
+    return ApolloDuoRailFindPostsNav(tabs, NO);
 }
 
 static UINavigationController *ApolloDuoRailPostsNav(UITabBarController *tabs) {
@@ -514,10 +520,15 @@ static void ApolloDuoApplyInsetsToController(UIViewController *controller,
 // Show: only the tab controller and its tab-root navs get the leading
 // content inset. Pushed content is frame-shifted instead so headers
 // and Texture feeds clear the rail without stacking another inset.
+// Book split: leading inset is always 0 (rail is overlay; frames own
+// the half-panes). A leftover +120 is the c0c7cbd double-shift.
 static void ApolloDuoApplyChromeInsets(UITabBarController *tabs,
                                        CGFloat wantLeft,
                                        CGFloat wantBottom,
                                        CGFloat wantRight) {
+    if (ApolloDuoBookIsActive()) {
+        wantLeft = (CGFloat)ApolloDuoBookRailChromeInsetLeftWhenActive();
+    }
     ApolloDuoApplyInsetsToController(tabs, wantLeft, wantBottom, wantRight);
     for (UIViewController *child in tabs.viewControllers) {
         ApolloDuoApplyInsetsToController(child, wantLeft, wantBottom, wantRight);
@@ -871,6 +882,9 @@ static UIScrollView *ApolloDuoRailFindPrimaryTable(UIView *view, NSInteger depth
 // is what Texture honors — ASDK cells ignore additionalSafeAreaInsets.
 static BOOL ApolloDuoRailShiftScrollViewOffRail(UIScrollView *scrollView) {
     if (!scrollView || !scrollView.superview || !ApolloDuoRailIsActive()) return NO;
+    // Book panes are already the full half-width. V1's +120 window
+    // shift is the remaining double-shift after ExtraLeft was zeroed.
+    if (ApolloDuoBookIsActive()) return NO;
     CGFloat inset = (CGFloat)ApolloDuoRailContentLeftInset();
     CGRect frame = scrollView.frame;
     CGRect want = frame;
@@ -896,6 +910,18 @@ static BOOL ApolloDuoRailShiftScrollViewOffRail(UIScrollView *scrollView) {
 
 void ApolloDuoRailApplyListInsets(UIScrollView *scrollView) {
     if (!scrollView) return;
+    if (ApolloDuoBookIsActive()) {
+        // Overlay rail; FillPane already inset the list after ~120.
+        // Do not stack a second window shift or contentInset.left.
+        ApolloDuoRailApplyScrollInsetLeft(scrollView, 0.0);
+        if (![scrollView isKindOfClass:[UITableView class]]) return;
+        UITableView *tableView = (UITableView *)scrollView;
+        if (tableView.cellLayoutMarginsFollowReadableWidth) {
+            tableView.cellLayoutMarginsFollowReadableWidth = NO;
+        }
+        ApolloDuoRailApplySeparatorTrailing(tableView, 0.0);
+        return;
+    }
     BOOL active = ApolloDuoRailIsActive();
     if (active && ApolloDuoRailScrollViewIsTexture(scrollView)) {
         // Texture paints cells to the table bounds, not the safe area.
@@ -949,6 +975,7 @@ void ApolloDuoRailApplyListInsets(UIScrollView *scrollView) {
 }
 
 static void ApolloDuoRailFillController(UIViewController *controller, UIView *container) {
+    if (ApolloDuoBookIsActive()) return;
     if (!controller || !container || CGRectGetWidth(container.bounds) < 1.0) return;
     if (!controller.isViewLoaded) return;
     CGFloat containerWidth = CGRectGetWidth(container.bounds);
@@ -1092,17 +1119,104 @@ static void ApolloDuoRailFillController(UIViewController *controller, UIView *co
     }
 }
 
+static void ApolloDuoRailPinViewInRect(UIView *view, UIView *container, CGRect want) {
+    if (!view || !container || view == container) return;
+    UIView *parent = view.superview;
+    CGRect frame = want;
+    if (parent && parent != container) {
+        frame = [parent convertRect:want fromView:container];
+    }
+    if (CGRectGetWidth(frame) < 1.0 || CGRectGetHeight(frame) < 1.0) return;
+    // ExpandView forces FlexibleWidth, which grows the feed back to
+    // the full nav after UITabBarController layout. Book fill must
+    // keep a left pin so the right host stays visible.
+    view.autoresizingMask = UIViewAutoresizingFlexibleHeight
+        | UIViewAutoresizingFlexibleRightMargin;
+    if (fabs(CGRectGetMinX(view.frame) - CGRectGetMinX(frame)) >= 0.5
+        || fabs(CGRectGetMinY(view.frame) - CGRectGetMinY(frame)) >= 0.5
+        || fabs(CGRectGetWidth(view.frame) - CGRectGetWidth(frame)) >= 0.5
+        || fabs(CGRectGetHeight(view.frame) - CGRectGetHeight(frame)) >= 0.5) {
+        view.frame = frame;
+    }
+}
+
+void ApolloDuoRailFillPaneContentInRect(UIViewController *controller,
+                                        UIView *container,
+                                        CGRect want) {
+    if (!controller || !container || !controller.isViewLoaded) return;
+    if (CGRectGetWidth(want) < 1.0 || CGRectGetHeight(want) < 1.0) return;
+    UIView *layout = ApolloDuoRailLayoutView(controller, container);
+    if (layout && layout != container) {
+        ApolloDuoRailPinViewInRect(layout, container, want);
+    }
+    UIView *view = controller.view;
+    if (view && view != layout && view != container) {
+        ApolloDuoRailPinViewInRect(view, container, want);
+    }
+    if ([controller respondsToSelector:@selector(tableView)]) {
+        UIView *table = nil;
+        @try {
+            table = ((UIView *(*)(id, SEL))objc_msgSend)(controller, @selector(tableView));
+        } @catch (__unused NSException *exception) {
+            table = nil;
+        }
+        if ([table isKindOfClass:[UIScrollView class]]) {
+            ApolloDuoRailPinViewInRect(table, container, want);
+            ApolloDuoRailApplyListInsets((UIScrollView *)table);
+        }
+    }
+    UIScrollView *found = ApolloDuoRailFindPrimaryTable(view ?: layout, 5);
+    if (found) {
+        ApolloDuoRailPinViewInRect(found, container, want);
+        ApolloDuoRailApplyListInsets(found);
+    }
+}
+
+void ApolloDuoRailFillPaneContent(UIViewController *controller, UIView *container) {
+    if (!container) return;
+    ApolloDuoRailFillPaneContentInRect(controller, container, container.bounds);
+}
+
 void ApolloDuoRailFillOpenContent(void) {
-    if (!ApolloDuoRailIsActive()) return;
     UITabBarController *tabs = (UITabBarController *)ApolloMainTabBarController();
     if (![tabs isKindOfClass:[UITabBarController class]] || !tabs.isViewLoaded) return;
     UINavigationController *nav = ApolloDuoRailNavFromController(tabs.selectedViewController);
     if (!nav) nav = ApolloDuoRailFindPostsNav(tabs, NO);
     if (!nav.isViewLoaded) return;
-    // Keep the nav (and its bar) full-width so "Subreddits" stays centered.
     UIView *container = nav.view ?: tabs.view;
     UIViewController *top = nav.topViewController;
-    if (top) ApolloDuoRailFillController(top, container);
+    if (!top) return;
+    // Book: pin list/feed inside the left half-pane, starting after
+    // the overlay rail. ExtraLeft / chrome inset stay 0. Do not run
+    // the V1 full-window +120 expand.
+    if (ApolloDuoBookIsActive()) {
+        if (!ApolloDuoBookShouldApplyFrames()) return;
+        ApolloDuoBookRecoverIfNeeded();
+        top = nav.topViewController;
+        if (!top) return;
+        const char *topName = class_getName(top.class);
+        if (!ApolloDuoBookLeftPaneAllowsClass(topName)) return;
+        ApolloFeedSplitFrames frames = ApolloDuoBookFramesMake(tabs.view.bounds.size.width,
+                                                              tabs.view.bounds.size.height,
+                                                              0.0,
+                                                              ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen));
+        CGRect feed = CGRectMake((CGFloat)frames.feed.x, (CGFloat)frames.feed.y,
+                                 (CGFloat)frames.feed.width, (CGFloat)frames.feed.height);
+        CGRect inNav = [container convertRect:feed fromView:tabs.view];
+        if (CGRectGetWidth(inNav) < 1.0) inNav = feed;
+        ApolloDuoRailRect content = ApolloDuoBookHostedLeftContent(inNav.origin.x,
+                                                                  inNav.origin.y,
+                                                                  inNav.size.width,
+                                                                  inNav.size.height,
+                                                                  frames.feed.x);
+        CGRect want = CGRectMake((CGFloat)content.x, (CGFloat)content.y,
+                                 (CGFloat)content.width, (CGFloat)content.height);
+        ApolloDuoRailFillPaneContentInRect(top, container, want);
+        ApolloDuoSubsChromeApply(top);
+        return;
+    }
+    if (!ApolloDuoRailIsActive()) return;
+    ApolloDuoRailFillController(top, container);
 }
 
 static void ApolloDuoRailRestoreController(UIViewController *controller, UIView *container) {
@@ -1183,7 +1297,14 @@ void ApolloDuoRailSync(void) {
     if (![tabs isKindOfClass:[UITabBarController class]] || !tabs.isViewLoaded) return;
 
     int mode = ApolloDuoRailModeForTabs(tabs);
-    BOOL show = mode == ApolloDuoModeOpen;
+    // Book-split canvases (including ~951pt Phone-mode Duo sim) keep
+    // the V1 Open leading rail as an overlay. Do not hide it just
+    // because the detail host is installed — and do not inset for it.
+    int chromeMode = mode;
+    if (mode != ApolloDuoModeOpen && ApolloDuoBookWantsOpenRail()) {
+        chromeMode = ApolloDuoModeOpen;
+    }
+    BOOL show = chromeMode == ApolloDuoModeOpen;
     ApolloDuoRailView *rail = objc_getAssociatedObject(tabs, &kApolloDuoRailViewKey);
     BOOL wasActive = [objc_getAssociatedObject(tabs, &kApolloDuoRailActiveKey) boolValue];
     int previousMode = [objc_getAssociatedObject(tabs, &kApolloDuoRailModeKey) intValue];
@@ -1200,6 +1321,14 @@ void ApolloDuoRailSync(void) {
             ApolloLog(@"[DuoRail] hidden; stock tab bar restored (mode=%d)", mode);
         }
         ApolloDuoSubsChromeApplyToTabs(tabs);
+        // Layout / trait / rotate call RailSync every frame. Full BookSync
+        // here re-hosted comments (the freeze). Only decide when the rail
+        // itself actually changed; otherwise reassert frames if already up.
+        if (wasActive || previousMode != mode) {
+            ApolloDuoBookSync();
+        } else {
+            ApolloDuoBookReassertFrames();
+        }
         return;
     }
 
@@ -1207,7 +1336,7 @@ void ApolloDuoRailSync(void) {
         rail = [[ApolloDuoRailView alloc] initWithFrame:CGRectZero];
         objc_setAssociatedObject(tabs, &kApolloDuoRailViewKey, rail, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    BOOL leading = ApolloDuoModeIsLeading(mode);
+    BOOL leading = ApolloDuoModeIsLeading(chromeMode);
     rail.leading = leading;
     CGRect bounds = tabs.view.bounds;
     UIEdgeInsets safe = ApolloDuoRailSystemSafeInsets(tabs);
@@ -1239,28 +1368,45 @@ void ApolloDuoRailSync(void) {
     }
     [rail apollo_applyTheme];
 
-    CGFloat wantLeft = (CGFloat)ApolloDuoRailChromeLeftForMode(mode);
-    CGFloat wantRight = (CGFloat)ApolloDuoRailChromeRightForMode(mode);
-    CGFloat wantBottom = 0.0;
-    if (mode == ApolloDuoModeClosed && ApolloDuoCoverShouldApplyForTabs(tabs)) {
-        wantBottom = (CGFloat)ApolloDuoCoverPillBottom;
-    }
-    ApolloDuoApplyChromeInsets(tabs, wantLeft, wantBottom, wantRight);
     ApolloDuoRailSetTabBarHidden(tabs, YES);
     objc_setAssociatedObject(tabs, &kApolloDuoRailActiveKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (wasActive && previousMode != mode && previousMode != ApolloDuoModePhone) {
+    if (wasActive && previousMode != chromeMode && previousMode != ApolloDuoModePhone) {
         ApolloDuoRailClearOpenContent();
     }
-    objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ApolloDuoRailFillOpenContent();
-    if (!wasActive || previousMode != mode) {
-        ApolloLog(@"[DuoRail] shown %s sidebar (%.0f,%.0f %.0fx%.0f) mode=%d",
+    objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(chromeMode),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!wasActive || previousMode != chromeMode) {
+        ApolloLog(@"[DuoRail] shown %s sidebar (%.0f,%.0f %.0fx%.0f) mode=%d bookRail=%d",
                   leading ? "leading" : "trailing",
-                  frame.x, frame.y, frame.width, frame.height, mode);
+                  frame.x, frame.y, frame.width, frame.height, mode,
+                  chromeMode != mode ? 1 : 0);
         if (!sApolloDuoRailOpenedDefaultDirectory) {
             sApolloDuoRailOpenedDefaultDirectory = YES;
             ApolloDuoRailOpenDefaultDirectory(tabs);
         }
     }
+    if (!wasActive || previousMode != chromeMode) {
+        ApolloDuoBookSync();
+    } else {
+        ApolloDuoBookReassertFrames();
+    }
+
+    // Book: rail is overlay, leading inset is 0, panes are full halves.
+    // Apply chrome after BookSync so BookIsActive is current. ApplyChromeInsets
+    // also forces wantLeft=0 while the split is up.
+    CGFloat wantLeft = ApolloDuoBookIsActive()
+        ? (CGFloat)ApolloDuoBookRailChromeInsetLeftWhenActive()
+        : (CGFloat)ApolloDuoRailChromeLeftForMode(chromeMode);
+    CGFloat wantRight = (CGFloat)ApolloDuoRailChromeRightForMode(chromeMode);
+    CGFloat wantBottom = 0.0;
+    if (mode == ApolloDuoModeClosed && ApolloDuoCoverShouldApplyForTabs(tabs)) {
+        wantBottom = (CGFloat)ApolloDuoCoverPillBottom;
+    }
+    if (ApolloDuoBookIsActive()) {
+        ApolloDuoClearLeadingChromeInsets(tabs, wantBottom, wantRight);
+    } else {
+        ApolloDuoApplyChromeInsets(tabs, wantLeft, wantBottom, wantRight);
+    }
+    ApolloDuoRailFillOpenContent();
     ApolloDuoSubsChromeApplyToTabs(tabs);
 }
