@@ -10,7 +10,6 @@
 #import "ApolloDuoCompatibility.h"
 #import "ApolloDuoRail.h"
 #import "ApolloDuoSubsChrome.h"
-#import "ApolloPerPostCommentSort.h"
 #import "ApolloState.h"
 
 // Sibling detail host — not Mail-style dual-VC tiling inside one
@@ -253,9 +252,22 @@ static NSString *ApolloDuoBookNormalizedPostKey(NSString *raw) {
     return [@"t3_" stringByAppendingString:key];
 }
 
+static id ApolloDuoBookCommentsLink(UIViewController *comments) {
+    // Do not call ApolloCommentsVCLink — that export lives in a Logos
+    // .xm (C++ mangled) and does not link from this .m (sim: undefined
+    // _ApolloCommentsVCLink). Walk the class for the RDKLink ivar.
+    Class cls = comments ? object_getClass(comments) : Nil;
+    while (cls) {
+        Ivar ivar = class_getInstanceVariable(cls, "link");
+        if (ivar) return object_getIvar(comments, ivar);
+        cls = class_getSuperclass(cls);
+    }
+    return nil;
+}
+
 static NSString *ApolloDuoBookPostKey(UIViewController *comments) {
     if (!comments) return nil;
-    id link = ApolloCommentsVCLink(comments);
+    id link = ApolloDuoBookCommentsLink(comments);
     if (link) {
         SEL selectors[] = { @selector(fullName), @selector(identifier), @selector(name) };
         for (unsigned i = 0; i < sizeof(selectors) / sizeof(selectors[0]); i++) {
