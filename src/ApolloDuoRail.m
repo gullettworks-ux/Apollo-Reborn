@@ -520,6 +520,8 @@ static void ApolloDuoApplyInsetsToController(UIViewController *controller,
 // Show: only the tab controller and its tab-root navs get the leading
 // content inset. Pushed content is frame-shifted instead so headers
 // and Texture feeds clear the rail without stacking another inset.
+// Book split: pass wantLeft=0. Frames already reserved ExtraLeft;
+// another +120 here is the c0c7cbd double-shift.
 static void ApolloDuoApplyChromeInsets(UITabBarController *tabs,
                                        CGFloat wantLeft,
                                        CGFloat wantBottom,
@@ -1174,9 +1176,12 @@ void ApolloDuoRailFillOpenContent(void) {
         if (!top) return;
         const char *topName = class_getName(top.class);
         if (!ApolloDuoBookLeftPaneAllowsClass(topName)) return;
+        int frameMode = ApolloDuoBookFrameModeForState(ApolloDuoCurrentMode(),
+                                                      (ApolloDuoRailIsActive()
+                                                       || ApolloDuoBookWantsOpenRail()) ? 1 : 0);
         ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(tabs.view.bounds.size.width,
                                                                   tabs.view.bounds.size.height,
-                                                                  ApolloDuoCurrentMode());
+                                                                  frameMode);
         CGRect feed = CGRectMake((CGFloat)frames.feed.x, (CGFloat)frames.feed.y,
                                  (CGFloat)frames.feed.width, (CGFloat)frames.feed.height);
         CGRect inNav = [container convertRect:feed fromView:tabs.view];
@@ -1266,35 +1271,17 @@ void ApolloDuoRailSync(void) {
     if (![tabs isKindOfClass:[UITabBarController class]] || !tabs.isViewLoaded) return;
 
     int mode = ApolloDuoRailModeForTabs(tabs);
+    // Book-split canvases (including ~951pt Phone-mode Duo sim) keep
+    // the V1 Open leading rail visually. Do not hide it just because
+    // the detail host is installed — host is the right pane.
+    int chromeMode = mode;
+    if (mode != ApolloDuoModeOpen && ApolloDuoBookWantsOpenRail()) {
+        chromeMode = ApolloDuoModeOpen;
+    }
+    BOOL show = chromeMode == ApolloDuoModeOpen;
     ApolloDuoRailView *rail = objc_getAssociatedObject(tabs, &kApolloDuoRailViewKey);
     BOOL wasActive = [objc_getAssociatedObject(tabs, &kApolloDuoRailActiveKey) boolValue];
     int previousMode = [objc_getAssociatedObject(tabs, &kApolloDuoRailModeKey) intValue];
-
-    // Book geometry lock: no rail column and no leading inset while
-    // the two-pane split is up. Keep the tab bar hidden so we do not
-    // steal bottom height. Overlay chrome lives on the detail nav.
-    if (ApolloDuoBookIsActive()) {
-        if (rail.superview) [rail removeFromSuperview];
-        ApolloDuoClearLeadingChromeInsets(tabs, 0.0, 0.0);
-        ApolloDuoRailSetTabBarHidden(tabs, YES);
-        objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(mode),
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        if (wasActive) {
-            objc_setAssociatedObject(tabs, &kApolloDuoRailActiveKey, nil,
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            ApolloLog(@"[DuoRail] hidden for book split (no reserved column)");
-        }
-        ApolloDuoSubsChromeApplyToTabs(tabs);
-        if (wasActive || previousMode != mode) {
-            ApolloDuoBookSync();
-        } else {
-            ApolloDuoBookReassertFrames();
-        }
-        ApolloDuoRailFillOpenContent();
-        return;
-    }
-
-    BOOL show = mode == ApolloDuoModeOpen;
 
     if (!show) {
         if (rail.superview) [rail removeFromSuperview];
@@ -1323,7 +1310,7 @@ void ApolloDuoRailSync(void) {
         rail = [[ApolloDuoRailView alloc] initWithFrame:CGRectZero];
         objc_setAssociatedObject(tabs, &kApolloDuoRailViewKey, rail, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    BOOL leading = ApolloDuoModeIsLeading(mode);
+    BOOL leading = ApolloDuoModeIsLeading(chromeMode);
     rail.leading = leading;
     CGRect bounds = tabs.view.bounds;
     UIEdgeInsets safe = ApolloDuoRailSystemSafeInsets(tabs);
@@ -1355,32 +1342,45 @@ void ApolloDuoRailSync(void) {
     }
     [rail apollo_applyTheme];
 
-    CGFloat wantLeft = (CGFloat)ApolloDuoRailChromeLeftForMode(mode);
-    CGFloat wantRight = (CGFloat)ApolloDuoRailChromeRightForMode(mode);
-    CGFloat wantBottom = 0.0;
-    if (mode == ApolloDuoModeClosed && ApolloDuoCoverShouldApplyForTabs(tabs)) {
-        wantBottom = (CGFloat)ApolloDuoCoverPillBottom;
-    }
-    ApolloDuoApplyChromeInsets(tabs, wantLeft, wantBottom, wantRight);
     ApolloDuoRailSetTabBarHidden(tabs, YES);
     objc_setAssociatedObject(tabs, &kApolloDuoRailActiveKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (wasActive && previousMode != mode && previousMode != ApolloDuoModePhone) {
+    if (wasActive && previousMode != chromeMode && previousMode != ApolloDuoModePhone) {
         ApolloDuoRailClearOpenContent();
     }
-    objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    if (!wasActive || previousMode != mode) {
-        ApolloLog(@"[DuoRail] shown %s sidebar (%.0f,%.0f %.0fx%.0f) mode=%d",
+    objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(chromeMode),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!wasActive || previousMode != chromeMode) {
+        ApolloLog(@"[DuoRail] shown %s sidebar (%.0f,%.0f %.0fx%.0f) mode=%d bookRail=%d",
                   leading ? "leading" : "trailing",
-                  frame.x, frame.y, frame.width, frame.height, mode);
+                  frame.x, frame.y, frame.width, frame.height, mode,
+                  chromeMode != mode ? 1 : 0);
         if (!sApolloDuoRailOpenedDefaultDirectory) {
             sApolloDuoRailOpenedDefaultDirectory = YES;
             ApolloDuoRailOpenDefaultDirectory(tabs);
         }
     }
-    if (!wasActive || previousMode != mode) {
+    if (!wasActive || previousMode != chromeMode) {
         ApolloDuoBookSync();
     } else {
         ApolloDuoBookReassertFrames();
+    }
+
+    // Book frames already start the feed at ExtraLeft (~120). A second
+    // additionalSafeAreaInsets.left of 120 is the c0c7cbd double-shift
+    // (narrow center column + clipped titles). Apply chrome after
+    // BookSync so BookIsActive is current; skip the left inset then.
+    CGFloat wantLeft = ApolloDuoBookIsActive()
+        ? (CGFloat)ApolloDuoBookRailChromeInsetLeftWhenActive()
+        : (CGFloat)ApolloDuoRailChromeLeftForMode(chromeMode);
+    CGFloat wantRight = (CGFloat)ApolloDuoRailChromeRightForMode(chromeMode);
+    CGFloat wantBottom = 0.0;
+    if (mode == ApolloDuoModeClosed && ApolloDuoCoverShouldApplyForTabs(tabs)) {
+        wantBottom = (CGFloat)ApolloDuoCoverPillBottom;
+    }
+    if (ApolloDuoBookIsActive()) {
+        ApolloDuoClearLeadingChromeInsets(tabs, wantBottom, wantRight);
+    } else {
+        ApolloDuoApplyChromeInsets(tabs, wantLeft, wantBottom, wantRight);
     }
     ApolloDuoRailFillOpenContent();
     ApolloDuoSubsChromeApplyToTabs(tabs);

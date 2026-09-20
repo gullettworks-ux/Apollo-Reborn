@@ -55,12 +55,13 @@ until a post is selected, then that post’s `CommentsViewController`.
 
 Frames split around the hinge mid with a **40pt gutter** (half-gap each
 side) so the panes do not bleed across the spine. Open’s leading-rail
-extra (120pt) and a 16pt trailing bezel inset still apply. The posts
-nav stays full-window (`UITabBarController` resets the selected child’s
-frame). List/feed content is pinned to the left half; the detail host
-overlays the trailing half; a hairline gutter view covers the mid strip.
-Hosted comments fill the host (no readable-width letterbox). The jump
-FAB pins to the detail pane’s trailing-safe corner.
+`ExtraLeft` (120pt) and a 16pt trailing bezel inset still apply. The
+posts nav stays full-window (`UITabBarController` resets the selected
+child’s frame). List/feed content is pinned to the left half; the
+detail host overlays the trailing half; a hairline gutter view covers
+the mid strip. Hosted comments fill the host (no readable-width
+letterbox). The jump FAB pins to the detail pane’s trailing-safe
+corner.
 
 BookSync / ApplyFrames / ShowDetail are hard-gated during **any**
 bounds / size-class / rotate transition and while a presented overlay
@@ -70,19 +71,23 @@ fresh `UINavigationController` again. AdoptPush does not call Sync.
 Rail `viewDidLayout` / `traitCollectionDidChange` only reassert frames
 — they do not TearDown + re-host (that loop froze the sim: hosted
 comments every ~250ms + nav-bar size-class asserts). One Sync runs
-after the transition settles. While the book is up the V1 Open rail
-is **not** installed as a reserved column (no leading content inset,
-no third panel). Feed and detail use the full half-pane. Detail
+after the transition settles. The V1 Open **leading rail stays
+visible** beside the book (including ~951pt Phone-mode Duo sim via
+`ApolloDuoBookWantsOpenRail`). Book frames reserve that rail once.
+While the split is up, `ApolloDuoApplyChromeInsets` must **not** add
+another left `additionalSafeAreaInsets` of ~120pt — that double-shift
+(`c0c7cbd`) crushed the feed into a narrow center column. Use
+`ApolloDuoBookRailChromeInsetLeftWhenActive()` (0) instead. Detail
 comments use `ApolloNavigationController` so sort / more / search
 stay overlay nav-item chrome, plus a pinned back chevron that pops
 or returns to “Select a post”.
 
-Once the posts nav is the left pane, V1 `ApolloDuoRailFillPaneContent`
-fills the visible feed/list into `nav.bounds` (no second +120 rail
-inset — the pane origin already clears the sidebar). Subs chrome
-(`ApolloDuoSubsChromeApply`) then recenters the title / Edit / + on
-that left pane. `ApolloDuoRailFillOpenContent` takes the same pane
-path while the book is up so Texture / RedditList keep V1 insets.
+Once the posts nav is the left pane, `ApolloDuoRailFillPaneContentInRect`
+pins the list into the **already ExtraLeft-shifted** feed rectangle
+(no second +120 rail inset). Subs chrome (`ApolloDuoSubsChromeApply`)
+then recenters the title / Edit / + on that left pane.
+`ApolloDuoRailFillOpenContent` takes the same pane path while the
+book is up so Texture / RedditList keep a single reserve.
 
 Tap a later post **replaces** the right pane. In-post / nested
 navigation from hosted comments **pushes on the detail nav** — it
@@ -105,9 +110,8 @@ Not adopted (stock push, or not intercepted):
 - URL / floating-tab opens that never pass through the posts nav
 - list \| feed (Subs directory beside a feed) — Open rail + `popToRoot`
   RedditList is unchanged
-- Comments in the right pane sit in a stock `UINavigationController`
-  (not the tab’s `ApolloNavigationController`), so some Apollo nav-bar
-  chrome / hooks may be missing until a later slice
+- Comments in the right pane sit in a sibling `ApolloNavigationController`
+  (not the tab’s posts nav) so sort / more / search stay overlay chrome
 
 Wrapping the tab in `UISplitViewController` / `UIArrangementViewController`
 is still rejected (settings, floating tabs, swipe-up, URL routing).

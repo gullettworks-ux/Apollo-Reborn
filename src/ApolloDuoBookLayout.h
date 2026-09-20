@@ -200,12 +200,41 @@ static inline int ApolloDuoBookSplitShouldEnableForWindow(int duoMode,
                                                    width, height, 0);
 }
 
-// Book panes use the full half-width (Aaron's locked shot). Do not
-// reserve the V1 Open rail as a third column — that collapsed the
-// feed. extraRight is trailing bezel chrome, not a rail.
-static inline double ApolloDuoBookExtraLeftForMode(int mode) {
-    (void)mode;
+// Book-split canvases keep the V1 Open *leading* rail visually
+// (112pt / content 120) even when V1 mode is Phone (~951pt Duo sim).
+// Frames reserve that column once. Do not also apply the rail's
+// additionalSafeAreaInsets.left while the book is up — that is the
+// c0c7cbd double-shift (feed at 120 plus another +120 inset).
+static inline int ApolloDuoBookWantsOpenRailForCanvas(int duoMode,
+                                                      int hingeStatus,
+                                                      double width,
+                                                      double height,
+                                                      int duoHint) {
+    return ApolloDuoBookSplitShouldEnableForCanvas(duoMode, hingeStatus,
+                                                   width, height, duoHint);
+}
+
+// While the book is up, chrome inset is 0 because ExtraLeft already
+// reserved the rail. Never ExtraLeft + inset (c0c7cbd double-shift).
+static inline double ApolloDuoBookRailChromeInsetLeftWhenActive(void) {
     return 0.0;
+}
+
+// Promote Phone-mode book canvases (Duo sim ~951pt) to Open extras
+// when the leading rail is up or wanted. Closed stays Phone extras
+// unless wantsOpenExtras is set.
+static inline int ApolloDuoBookFrameModeForState(int duoMode, int wantsOpenExtras) {
+    if (duoMode == ApolloDuoModeOpen || wantsOpenExtras) {
+        return ApolloDuoModeOpen;
+    }
+    return ApolloDuoModePhone;
+}
+
+// Open extraLeft is the single leading-rail reserve. extraRight is
+// trailing bezel chrome, not a rail. Phone/Closed extraLeft is 0
+// unless runtime promotes frameMode to Open because the rail is up.
+static inline double ApolloDuoBookExtraLeftForMode(int mode) {
+    return ApolloDuoRailChromeLeftForMode(mode);
 }
 
 static inline double ApolloDuoBookExtraRightForMode(int mode) {

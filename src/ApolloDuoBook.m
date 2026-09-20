@@ -896,6 +896,23 @@ static UIBarButtonItem *ApolloDuoBookMakeBackItem(void) {
     return item;
 }
 
+int ApolloDuoBookWantsOpenRail(void) {
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    CGSize size = CGSizeZero;
+    if (tabs.isViewLoaded) size = tabs.view.bounds.size;
+    if (size.width < 1.0) {
+        UIWindow *window = ApolloDeviceAppWindow();
+        if (window) size = window.bounds.size;
+    }
+    int posture = ApolloDuoBookCurrentPosture();
+    return ApolloDuoBookSplitShouldEnable(posture, size.width);
+}
+
+static int ApolloDuoBookRuntimeFrameMode(int duoMode) {
+    int wantsOpen = (ApolloDuoRailIsActive() || ApolloDuoBookWantsOpenRail()) ? 1 : 0;
+    return ApolloDuoBookFrameModeForState(duoMode, wantsOpen);
+}
+
 void ApolloDuoBookEnsureDetailBack(UIViewController *controller) {
     if (!controller || !ApolloDuoBookIsActive()) return;
     UITabBarController *tabs = ApolloDuoBookTabs();
@@ -1339,7 +1356,8 @@ void ApolloDuoBookReassertFrames(void) {
     UITabBarController *tabs = ApolloDuoBookTabs();
     if (!tabs || !ApolloDuoBookIsActive()) return;
     if (!ApolloDuoBookShouldApplyFrames()) return;
-    ApolloDuoBookApplyFrames(tabs, ApolloDuoBookLiveDuoMode());
+    int duoMode = ApolloDuoBookLiveDuoMode();
+    ApolloDuoBookApplyFrames(tabs, ApolloDuoBookRuntimeFrameMode(duoMode));
 }
 
 void ApolloDuoBookSync(void) {
@@ -1370,8 +1388,7 @@ void ApolloDuoBookSync(void) {
     if (window && window.bounds.size.width > size.width + 0.5) {
         size = window.bounds.size;
     }
-    int frameMode = (duoMode == ApolloDuoModeOpen || ApolloDuoRailIsActive())
-        ? ApolloDuoModeOpen : ApolloDuoModePhone;
+    int frameMode = ApolloDuoBookRuntimeFrameMode(duoMode);
     double extraLeft = ApolloDuoBookExtraLeftForMode(frameMode);
     double extraRight = ApolloDuoBookExtraRightForMode(frameMode);
     double usable = ApolloFeedSplitUsableWidth(size.width, extraLeft, extraRight);
