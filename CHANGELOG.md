@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- **Duo book layout:** on fully-open landscape Duo and mid-open book posture, the main feed stays on the left and a selected post’s comments open on the right (empty “Select a post” placeholder until then). Closed portrait Duo and regular iPhone keep the ApolloDuoV1 single-pane path. Hosted comments are pushed back onto the posts stack when the split tears down. First slice is `PostsViewController` → `CommentsViewController` only
+- **Duo book layout:** on fully-open landscape Duo and mid-open book posture, the main feed stays on the left and a selected post’s comments open on the right (empty “Select a post” placeholder until then). Reuses V1 rail posts-nav lookup, pane fill, and Subs chrome on the left column. Closed portrait Duo and regular iPhone keep the ApolloDuoV1 single-pane path. Hosted comments are pushed back onto the posts stack when the split tears down. First slice is posts-nav feed → `CommentsViewController` only
 
 ### Build
 

@@ -136,6 +136,23 @@ static inline ApolloFeedSplitFrames ApolloDuoBookFramesForMode(double containerW
                                    ApolloDuoBookExtraRightForMode(mode));
 }
 
+// Children of a pane whose *origin* already sits at/after the rail
+// fill (0,0,paneW,paneH). A second +120 inset is the V1 crush.
+static inline ApolloDuoRailRect ApolloDuoBookPaneContentFrame(double paneWidth,
+                                                              double paneHeight) {
+    ApolloDuoRailRect rect;
+    rect.x = 0.0;
+    rect.y = 0.0;
+    rect.width = paneWidth > 0.0 ? paneWidth : 0.0;
+    rect.height = paneHeight > 0.0 ? paneHeight : 0.0;
+    return rect;
+}
+
+// 1 when the pane is already past the rail, so a child at x=0 is clear.
+static inline int ApolloDuoBookPaneOriginClearsRail(double paneWindowX) {
+    return paneWindowX + 0.5 >= ApolloDuoRailContentLeftInset();
+}
+
 #ifdef __cplusplus
 }
 #endif

@@ -116,6 +116,10 @@ static UINavigationController *ApolloDuoRailFindPostsNav(UITabBarController *tab
     return best;
 }
 
+UINavigationController *ApolloDuoRailPostsNavigationController(UITabBarController *tabs) {
+    return ApolloDuoRailFindPostsNav(tabs, NO);
+}
+
 static UINavigationController *ApolloDuoRailPostsNav(UITabBarController *tabs) {
     if (!tabs) return nil;
     if ([tabs respondsToSelector:@selector(goToHomeTab)]) {
@@ -1093,20 +1097,62 @@ static void ApolloDuoRailFillController(UIViewController *controller, UIView *co
     }
 }
 
+void ApolloDuoRailFillPaneContent(UIViewController *controller, UIView *container) {
+    if (!controller || !container || !controller.isViewLoaded) return;
+    if (CGRectGetWidth(container.bounds) < 1.0 || CGRectGetHeight(container.bounds) < 1.0) {
+        return;
+    }
+    CGRect want = container.bounds;
+    UIView *layout = ApolloDuoRailLayoutView(controller, container);
+    if (layout && layout != container) {
+        ApolloDuoRailExpandView(layout, want);
+    }
+    UIView *view = controller.view;
+    if (view && view != layout && view != container) {
+        ApolloDuoRailExpandView(view, layout && layout != view ? layout.bounds : want);
+    }
+    if ([controller respondsToSelector:@selector(tableView)]) {
+        UIView *table = nil;
+        @try {
+            table = ((UIView *(*)(id, SEL))objc_msgSend)(controller, @selector(tableView));
+        } @catch (__unused NSException *exception) {
+            table = nil;
+        }
+        if ([table isKindOfClass:[UIScrollView class]]) {
+            UIView *tableParent = table.superview ?: view;
+            if (tableParent == container) {
+                ApolloDuoRailExpandView(table, want);
+            } else if (tableParent && tableParent != container) {
+                table.autoresizingMask = UIViewAutoresizingFlexibleWidth
+                    | UIViewAutoresizingFlexibleHeight;
+                table.frame = tableParent.bounds;
+            }
+            ApolloDuoRailApplyListInsets((UIScrollView *)table);
+        }
+    }
+    UIScrollView *found = ApolloDuoRailFindPrimaryTable(view ?: layout, 5);
+    if (found) {
+        ApolloDuoRailApplyListInsets(found);
+    }
+}
+
 void ApolloDuoRailFillOpenContent(void) {
-    if (!ApolloDuoRailIsActive()) return;
-    // Book layout owns the posts-nav frame (left pane). Expanding it
-    // here would undo the hinge split and paint the feed under comments.
-    if (ApolloDuoBookIsActive()) return;
     UITabBarController *tabs = (UITabBarController *)ApolloMainTabBarController();
     if (![tabs isKindOfClass:[UITabBarController class]] || !tabs.isViewLoaded) return;
     UINavigationController *nav = ApolloDuoRailNavFromController(tabs.selectedViewController);
     if (!nav) nav = ApolloDuoRailFindPostsNav(tabs, NO);
     if (!nav.isViewLoaded) return;
-    // Keep the nav (and its bar) full-width so "Subreddits" stays centered.
     UIView *container = nav.view ?: tabs.view;
     UIViewController *top = nav.topViewController;
-    if (top) ApolloDuoRailFillController(top, container);
+    if (!top) return;
+    // Book already sized the posts nav to the left pane. Fill children
+    // into that pane — do not run the full-window +120 rail frame again.
+    if (ApolloDuoBookIsActive()) {
+        ApolloDuoRailFillPaneContent(top, container);
+        return;
+    }
+    if (!ApolloDuoRailIsActive()) return;
+    ApolloDuoRailFillController(top, container);
 }
 
 static void ApolloDuoRailRestoreController(UIViewController *controller, UIView *container) {
@@ -1257,7 +1303,6 @@ void ApolloDuoRailSync(void) {
         ApolloDuoRailClearOpenContent();
     }
     objc_setAssociatedObject(tabs, &kApolloDuoRailModeKey, @(mode), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ApolloDuoRailFillOpenContent();
     if (!wasActive || previousMode != mode) {
         ApolloLog(@"[DuoRail] shown %s sidebar (%.0f,%.0f %.0fx%.0f) mode=%d",
                   leading ? "leading" : "trailing",
@@ -1267,6 +1312,7 @@ void ApolloDuoRailSync(void) {
             ApolloDuoRailOpenDefaultDirectory(tabs);
         }
     }
-    ApolloDuoSubsChromeApplyToTabs(tabs);
     ApolloDuoBookSync();
+    ApolloDuoRailFillOpenContent();
+    ApolloDuoSubsChromeApplyToTabs(tabs);
 }

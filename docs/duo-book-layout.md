@@ -11,6 +11,12 @@ host inside one `ApolloNavigationController` (column pins from
 produced overscroll ghosts and skippy comments scroll. This slice
 hosts comments in a **sibling** of the posts nav instead.
 
+V1 Duo code is **copied and adapted** here (rail posts-nav lookup,
+`ApolloDuoCurrentMode`, `ApolloDuoRailFillPaneContent`, Subs chrome,
+FeedSplit column math). The frozen `release/apollo-duo-v1` branch /
+`apollo-duo-v1` tag / Desktop `ApolloDuoV1-SAFE` artifacts are not
+modified.
+
 ## When the split is on
 
 | Posture | How it is detected | Split |
@@ -47,9 +53,14 @@ until a post is selected, then that post’s `CommentsViewController`.
 Frames reuse `ApolloFeedSplitFramesMake` (balanced, pin-leading) with
 Open’s leading-rail extra (120pt). The posts nav’s view is resized to
 the left rect; the detail host is a child of the tab controller on the
-right. The rail stays in front. `ApolloDuoRailFillOpenContent` no-ops
-while the book is active so it cannot expand the feed back under the
-comments.
+right. The rail stays in front.
+
+Once the posts nav is the left pane, V1 `ApolloDuoRailFillPaneContent`
+fills the visible feed/list into `nav.bounds` (no second +120 rail
+inset — the pane origin already clears the sidebar). Subs chrome
+(`ApolloDuoSubsChromeApply`) then recenters the title / Edit / + on
+that left pane. `ApolloDuoRailFillOpenContent` takes the same pane
+path while the book is up so Texture / RedditList keep V1 insets.
 
 Tap a later post **replaces** the right pane. Closed / Phone tear-down
 unwraps the hosted comments and pushes them onto the posts nav so the

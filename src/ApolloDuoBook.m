@@ -7,8 +7,9 @@
 
 #import "ApolloCommon.h"
 #import "ApolloDeviceDisplay.h"
-#import "ApolloDeviceGeometry.h"
 #import "ApolloDuoCompatibility.h"
+#import "ApolloDuoRail.h"
+#import "ApolloDuoSubsChrome.h"
 #import "ApolloState.h"
 
 // Sibling detail host — not Mail-style dual-VC tiling inside one
@@ -94,8 +95,14 @@ static BOOL ApolloDuoBookClassNamed(UIViewController *controller, const char *na
     return cls && controller && [controller isKindOfClass:cls];
 }
 
+// Copied from the V1 FeedSplit classifier: the posts nav also hosts
+// Lite / search / saved-posts lists. First-slice adopt still requires
+// a comments push; these names only decide "there is a feed on the left."
 static BOOL ApolloDuoBookIsFeedController(UIViewController *controller) {
-    return ApolloDuoBookClassNamed(controller, "_TtC6Apollo19PostsViewController");
+    return ApolloDuoBookClassNamed(controller, "_TtC6Apollo19PostsViewController")
+        || ApolloDuoBookClassNamed(controller, "_TtC6Apollo23LitePostsViewController")
+        || ApolloDuoBookClassNamed(controller, "_TtC6Apollo32SavedPostsCommentsViewController")
+        || ApolloDuoBookClassNamed(controller, "_TtC6Apollo32PostsSearchResultsViewController");
 }
 
 static BOOL ApolloDuoBookIsCommentsController(UIViewController *controller) {
@@ -108,49 +115,14 @@ static BOOL ApolloDuoBookIsCommentsController(UIViewController *controller) {
 }
 
 static UINavigationController *ApolloDuoBookFindPostsNav(UITabBarController *tabs) {
-    if (!tabs) return nil;
-    Class listClass = objc_getClass("_TtC6Apollo24RedditListViewController");
-    Class postsClass = objc_getClass("_TtC6Apollo19PostsViewController");
-    UINavigationController *best = nil;
-    for (UIViewController *child in tabs.viewControllers) {
-        UINavigationController *nav = ApolloDuoBookNavFromController(child);
-        if (!nav) continue;
-        for (UIViewController *vc in nav.viewControllers) {
-            if ((listClass && [vc isKindOfClass:listClass])
-                || (postsClass && [vc isKindOfClass:postsClass])) {
-                return nav;
-            }
-        }
-        if (!best) best = nav;
-    }
-    return best ?: ApolloDuoBookNavFromController(tabs.selectedViewController);
-}
-
-static int ApolloDuoBookDualDisplays(void) {
-    CGSize sizes[4];
-    unsigned count = 0;
-    for (UIScreen *screen in [UIScreen screens]) {
-        CGSize size = screen.bounds.size;
-        if (size.width <= 0.0 || size.height <= 0.0) continue;
-        unsigned i;
-        int seen = 0;
-        for (i = 0; i < count; i++) {
-            if (fabs(sizes[i].width - size.width) < 1.0
-                && fabs(sizes[i].height - size.height) < 1.0) {
-                seen = 1;
-                break;
-            }
-        }
-        if (!seen && count < 4) sizes[count++] = size;
-    }
-    if (count < 2) return 0;
-    return ApolloDisplayScreensAreDual(sizes[0].width, sizes[0].height,
-                                       sizes[1].width, sizes[1].height);
+    return ApolloDuoRailPostsNavigationController(tabs);
 }
 
 static int ApolloDuoBookLiveDuoMode(void) {
+    int mode = ApolloDuoCurrentMode();
+    if (mode != ApolloDuoModePhone) return mode;
     UIWindow *window = ApolloDeviceAppWindow();
-    return ApolloDuoModeFromWindow(window, ApolloDuoBookDualDisplays());
+    return ApolloDuoModeFromWindow(window, 0);
 }
 
 static int ApolloDuoBookMapHingeObject(id hinge) {
@@ -408,6 +380,12 @@ static void ApolloDuoBookApplyFrames(UITabBarController *tabs, int mode) {
         }
     }
     if (rail) [tabs.view bringSubviewToFront:rail];
+
+    // V1 rail fill + Subs chrome, now against the left pane bounds.
+    if (posts.topViewController) {
+        ApolloDuoRailFillPaneContent(posts.topViewController, posts.view);
+        ApolloDuoSubsChromeApply(posts.topViewController);
+    }
 }
 
 BOOL ApolloDuoBookIsActive(void) {
@@ -442,7 +420,7 @@ BOOL ApolloDuoBookAdoptPush(UINavigationController *nav, UIViewController *viewC
         }
     }
     if (!feedOnStack && !ApolloDuoBookIsFeedController(nav.topViewController)) {
-        ApolloLog(@"[DuoBook] comments push skipped (no PostsViewController on the posts nav)");
+        ApolloLog(@"[DuoBook] comments push skipped (no feed on the posts nav)");
         return NO;
     }
 

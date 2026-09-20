@@ -159,6 +159,14 @@ int main(void) {
     Check(empty.showsDetail && empty.feed.width + 0.5 <= 200.0,
           "a too-narrow canvas still reports book halves for the math");
 
+    ApolloDuoRailRect pane = ApolloDuoBookPaneContentFrame(open.feed.width, 744.0);
+    Check(Near(pane.x, 0.0) && Near(pane.width, open.feed.width),
+          "left-pane children fill the pane, not the full window");
+    Check(ApolloDuoBookPaneOriginClearsRail(open.feed.x),
+          "Open left-pane origin already clears the rail");
+    Check(!ApolloDuoBookPaneOriginClearsRail(0.0),
+          "a full-bleed pane origin still needs the V1 rail shift");
+
     printf("OK: %u checks\n", checks);
     return 0;
 }
