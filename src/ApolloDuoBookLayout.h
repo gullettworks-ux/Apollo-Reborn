@@ -200,11 +200,10 @@ static inline int ApolloDuoBookSplitShouldEnableForWindow(int duoMode,
                                                    width, height, 0);
 }
 
-// Book-split canvases keep the V1 Open *leading* rail visually
-// (112pt / content 120) even when V1 mode is Phone (~951pt Duo sim).
-// Frames reserve that column once. Do not also apply the rail's
-// additionalSafeAreaInsets.left while the book is up — that is the
-// c0c7cbd double-shift (feed at 120 plus another +120 inset).
+// Book-split canvases keep the V1 Open *leading* rail as an overlay
+// (112pt) even when V1 mode is Phone (~951pt Duo sim). The rail does
+// not reserve a column and does not apply a leading chrome inset —
+// book frames own the full half-panes (Aaron locked screenshot).
 static inline int ApolloDuoBookWantsOpenRailForCanvas(int duoMode,
                                                       int hingeStatus,
                                                       double width,
@@ -214,15 +213,14 @@ static inline int ApolloDuoBookWantsOpenRailForCanvas(int duoMode,
                                                    width, height, duoHint);
 }
 
-// While the book is up, chrome inset is 0 because ExtraLeft already
-// reserved the rail. Never ExtraLeft + inset (c0c7cbd double-shift).
+// Always 0 while the book is up. V1's +120 additionalSafeAreaInsets
+// plus a frame reserve is the c0c7cbd double-shift. Rail = overlay.
 static inline double ApolloDuoBookRailChromeInsetLeftWhenActive(void) {
     return 0.0;
 }
 
-// Promote Phone-mode book canvases (Duo sim ~951pt) to Open extras
-// when the leading rail is up or wanted. Closed stays Phone extras
-// unless wantsOpenExtras is set.
+// Overlay-rail canvases (Duo sim ~951pt) still report Open so the
+// rail can show. ExtraLeft stays 0 regardless of this mode.
 static inline int ApolloDuoBookFrameModeForState(int duoMode, int wantsOpenExtras) {
     if (duoMode == ApolloDuoModeOpen || wantsOpenExtras) {
         return ApolloDuoModeOpen;
@@ -230,11 +228,12 @@ static inline int ApolloDuoBookFrameModeForState(int duoMode, int wantsOpenExtra
     return ApolloDuoModePhone;
 }
 
-// Open extraLeft is the single leading-rail reserve. extraRight is
-// trailing bezel chrome, not a rail. Phone/Closed extraLeft is 0
-// unless runtime promotes frameMode to Open because the rail is up.
+// Never a reserved rail column. Feed is the full left half-pane;
+// the rail paints over the leading edge. extraRight is trailing
+// bezel chrome only.
 static inline double ApolloDuoBookExtraLeftForMode(int mode) {
-    return ApolloDuoRailChromeLeftForMode(mode);
+    (void)mode;
+    return 0.0;
 }
 
 static inline double ApolloDuoBookExtraRightForMode(int mode) {
@@ -321,8 +320,8 @@ static inline ApolloFeedSplitFrames ApolloDuoBookFramesForMode(double containerW
                                    ApolloDuoBookExtraRightForMode(mode));
 }
 
-// Children of a pane whose *origin* already sits at/after the rail
-// fill (0,0,paneW,paneH). A second +120 inset is the V1 crush.
+// Children fill the pane they were given (0,0,paneW,paneH). The
+// book rail is an overlay — do not add V1's +120 leading inset.
 static inline ApolloDuoRailRect ApolloDuoBookPaneContentFrame(double paneWidth,
                                                               double paneHeight) {
     ApolloDuoRailRect rect;

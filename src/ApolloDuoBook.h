@@ -63,9 +63,9 @@ void ApolloDuoBookRecoverIfNeeded(void);
 void ApolloDuoBookEnsureDetailBack(UIViewController *controller);
 
 /// YES when the live canvas should show the V1 Open *leading* rail
-/// alongside the book split (including ~951pt Phone-mode Duo sim).
-/// The rail is visual only on top of book frames — it must not add
-/// a second left chrome inset.
+/// as an overlay beside the book (including ~951pt Phone-mode Duo
+/// sim). Overlay only: leading content inset stays 0; frames are
+/// the full half-panes; no reserved third column.
 int ApolloDuoBookWantsOpenRail(void);
 
 __END_DECLS

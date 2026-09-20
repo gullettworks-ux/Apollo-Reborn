@@ -695,8 +695,9 @@ static UIViewController *ApolloDuoBookHost(UITabBarController *tabs, BOOL create
     // Persistent detail nav with the placeholder as root. Comments are
     // *pushed* so a back chevron can pop or return to "Select a post".
     // initWithRootViewController:comments hid the arrow (nothing to pop).
-    // Prefer Apollo's nav class so comments keep sort / more / search.
-    // This is not the tab's ApolloNavigationController.
+    // Hosted comments use ApolloNavigationController so sort / more /
+    // search / back stay available. This is a sibling of the posts nav,
+    // not the tab's own ApolloNavigationController.
     Class navClass = objc_getClass("_TtC6Apollo26ApolloNavigationController");
     UINavigationController *nav = nil;
     if (navClass) {
