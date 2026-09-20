@@ -170,6 +170,17 @@ int main(void) {
     Check(!ApolloDuoBookShouldWriteFrames(1, 1, 1),
           "overlay + transition + in-flight apply all block frame writes");
 
+    Check(ApolloDuoBookLeftPaneAllowsClass("_TtC6Apollo19PostsViewController"),
+          "the posts feed may occupy the left pane");
+    Check(ApolloDuoBookLeftPaneAllowsClass("_TtC6Apollo32SavedPostsCommentsViewController"),
+          "Saved Posts list may occupy the left pane");
+    Check(!ApolloDuoBookLeftPaneAllowsClass("_TtC6Apollo22CommentsViewController"),
+          "comments must not be pinned into the left feed frame");
+    Check(!ApolloDuoBookLeftPaneAllowsClass("_TtC6Apollo21MediaViewerController"),
+          "MediaViewer is an overlay, not a left-pane controller");
+    Check(!ApolloDuoBookLeftPaneAllowsClass("_TtC6Apollo26UserCommentsViewController"),
+          "user comments stay on the right host");
+
     Check(Near(ApolloDuoBookExtraRightForMode(ApolloDuoModeOpen),
                (double)ApolloDuoBookDetailTrailingChrome),
           "book extraRight is the trailing bezel chrome, not a rail");

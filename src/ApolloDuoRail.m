@@ -1169,6 +1169,11 @@ void ApolloDuoRailFillOpenContent(void) {
     // half. Do not run the full-window +120 rail expand.
     if (ApolloDuoBookIsActive()) {
         if (!ApolloDuoBookShouldApplyFrames()) return;
+        ApolloDuoBookRecoverIfNeeded();
+        top = nav.topViewController;
+        if (!top) return;
+        const char *topName = class_getName(top.class);
+        if (!ApolloDuoBookLeftPaneAllowsClass(topName)) return;
         ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(tabs.view.bounds.size.width,
                                                                   tabs.view.bounds.size.height,
                                                                   ApolloDuoCurrentMode());

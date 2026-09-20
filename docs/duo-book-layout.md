@@ -79,9 +79,14 @@ inset — the pane origin already clears the sidebar). Subs chrome
 that left pane. `ApolloDuoRailFillOpenContent` takes the same pane
 path while the book is up so Texture / RedditList keep V1 insets.
 
-Tap a later post **replaces** the right pane. Closed / Phone tear-down
-unwraps the hosted comments and pushes them onto the posts nav so the
-user is not dropped on a blank feed.
+Tap a later post **replaces** the right pane. In-post / nested
+navigation from hosted comments **pushes on the detail nav** — it
+must not land on the posts stack or PinLeftContent will paint
+comments in the feed column and leave the right host empty white.
+MediaViewer stays a fullscreen overlay; dismiss recovers any stolen
+comments back onto the right. Closed / Phone tear-down unwraps the
+hosted comments and pushes them onto the posts nav so the user is
+not dropped on a blank feed.
 
 ## What this slice does not do
 

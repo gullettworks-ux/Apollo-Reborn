@@ -42,4 +42,20 @@ void ApolloDuoBookEndSizeTransition(void);
 BOOL ApolloDuoBookAdoptPush(UINavigationController *nav,
                             UIViewController *viewController);
 
+/// Secondary navigation from the hosted comments pane: push onto the
+/// detail nav (never the posts/feed nav). Feed→comments still uses
+/// AdoptPush / ShowDetail. Media overlays return NO (stock present).
+BOOL ApolloDuoBookAdoptShow(UIViewController *source,
+                            UIViewController *destination);
+
+/// Strip comments/media off a posts-nav `setViewControllers:` stack
+/// and re-host the last comments on the right. Returns the stack to
+/// install (same pointer when nothing was stolen).
+NSArray *ApolloDuoBookAdoptPostsStack(UINavigationController *nav,
+                                      NSArray *controllers);
+
+/// If comments were stolen onto the posts nav (in-post tap / media
+/// dismiss), move them back to the right host. Safe to call often.
+void ApolloDuoBookRecoverIfNeeded(void);
+
 __END_DECLS

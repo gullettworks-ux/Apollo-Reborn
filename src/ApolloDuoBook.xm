@@ -76,6 +76,17 @@ static void ApolloDuoBookWatchTransition(id<UIViewControllerTransitionCoordinato
 
 %end
 
+%hook UIViewController
+
+- (void)showViewController:(UIViewController *)viewController sender:(id)sender {
+    if (ApolloDuoBookAdoptShow((UIViewController *)self, viewController)) {
+        return;
+    }
+    %orig;
+}
+
+%end
+
 %hook _TtC6Apollo26ApolloNavigationController
 
 - (void)pushViewController:(UIViewController *)viewController animated:(BOOL)animated {
@@ -86,10 +97,16 @@ static void ApolloDuoBookWatchTransition(id<UIViewControllerTransitionCoordinato
 }
 
 - (void)showViewController:(UIViewController *)viewController sender:(id)sender {
-    if (ApolloDuoBookAdoptPush((UINavigationController *)self, viewController)) {
+    if (ApolloDuoBookAdoptShow((UIViewController *)self, viewController)
+        || ApolloDuoBookAdoptPush((UINavigationController *)self, viewController)) {
         return;
     }
     %orig;
+}
+
+- (void)setViewControllers:(NSArray<UIViewController *> *)viewControllers animated:(BOOL)animated {
+    NSArray *adopted = ApolloDuoBookAdoptPostsStack((UINavigationController *)self, viewControllers);
+    %orig(adopted, animated);
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size
@@ -106,6 +123,7 @@ static void ApolloDuoBookWatchTransition(id<UIViewControllerTransitionCoordinato
 
 - (void)viewDidDisappear:(BOOL)animated {
     %orig;
+    ApolloDuoBookRecoverIfNeeded();
     if (ApolloDuoBookShouldApplyFrames()) {
         ApolloDuoBookSync();
     }

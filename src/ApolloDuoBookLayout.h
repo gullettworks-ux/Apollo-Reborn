@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#include <string.h>
+
 #include "ApolloDuoCompatibility.h"
 #include "ApolloDuoRailLayout.h"
 #include "ApolloFeedSplitLayout.h"
@@ -146,6 +148,31 @@ static inline int ApolloDuoBookPostureFromCanvas(int duoMode,
 static inline int ApolloDuoBookPostureAllowsSplit(int posture) {
     return posture == ApolloDuoBookPostureMidOpenBook
         || posture == ApolloDuoBookPostureFullyOpen;
+}
+
+// Left pane is the feed/list only. Comments (except the Saved Posts
+// list) and media viewers belong on the right host — pinning them
+// into the feed frame is the empty-right-pane bug.
+static inline int ApolloDuoBookLeftPaneAllowsClass(const char *name) {
+    if (!name) return 0;
+    if (strstr(name, "MediaViewer") != NULL
+        || strstr(name, "MediaPage") != NULL
+        || strstr(name, "GalleryViewController") != NULL
+        || strstr(name, "ImageViewer") != NULL) {
+        return 0;
+    }
+    if (strstr(name, "CommentsViewController") != NULL
+        && strstr(name, "SavedPosts") == NULL) {
+        return 0;
+    }
+    if (strstr(name, "PostsViewController") != NULL
+        || strstr(name, "LitePostsViewController") != NULL
+        || strstr(name, "SavedPostsCommentsViewController") != NULL
+        || strstr(name, "PostsSearchResultsViewController") != NULL
+        || strstr(name, "RedditList") != NULL) {
+        return 1;
+    }
+    return 0;
 }
 
 // Two 320pt columns + gutter. A mid-open cover (phone-narrow) must

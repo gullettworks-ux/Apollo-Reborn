@@ -44,6 +44,7 @@ static int sApolloDuoBookLastLogHint = -1;
 static double sApolloDuoBookLastLogUsable = -1.0;
 static CFAbsoluteTime sApolloDuoBookLastLogAt = 0.0;
 static BOOL sApolloDuoBookApplying = NO;
+static BOOL sApolloDuoBookMutatingStack = NO;
 static int sApolloDuoBookSizeTransitionCount = 0;
 static unsigned sApolloDuoBookSizeTransitionGen = 0;
 static CFAbsoluteTime sApolloDuoBookSizeTransitionAt = 0.0;
@@ -285,19 +286,30 @@ static NSString *ApolloDuoBookPostKey(UIViewController *comments) {
     return nil;
 }
 
+static BOOL ApolloDuoBookControllerInTree(UIViewController *vc, UIViewController *root) {
+    while (vc && root) {
+        if (vc == root) return YES;
+        vc = vc.parentViewController;
+    }
+    return NO;
+}
+
+static BOOL ApolloDuoBookHostContains(UITabBarController *tabs, UIViewController *vc) {
+    if (!tabs || !vc) return NO;
+    UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
+    UIViewController *existingNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
+    return ApolloDuoBookControllerInTree(vc, host)
+        || ApolloDuoBookControllerInTree(vc, existingNav);
+}
+
 static BOOL ApolloDuoBookAlreadyShows(UITabBarController *tabs, UIViewController *comments) {
     if (!tabs || !comments) return NO;
+    // Stolen onto the posts nav — not "already shown" on the right.
+    if (!ApolloDuoBookHostContains(tabs, comments)) return NO;
     UIViewController *existing = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailKey);
     if (existing == comments) return YES;
     UIViewController *existingNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
     UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
-    if (host) {
-        UIViewController *walk = comments.parentViewController;
-        while (walk) {
-            if (walk == host || walk == existingNav) return YES;
-            walk = walk.parentViewController;
-        }
-    }
     if (existingNav.parentViewController == host) {
         if ([existingNav isKindOfClass:[UINavigationController class]]
             && [[(UINavigationController *)existingNav viewControllers] containsObject:comments]) {
@@ -310,6 +322,30 @@ static BOOL ApolloDuoBookAlreadyShows(UITabBarController *tabs, UIViewController
         }
     }
     return NO;
+}
+
+static BOOL ApolloDuoBookIsLeftPaneController(UIViewController *controller) {
+    if (!controller) return NO;
+    return ApolloDuoBookLeftPaneAllowsClass(class_getName(controller.class)) ? YES : NO;
+}
+
+static BOOL ApolloDuoBookIsDetailDestination(UIViewController *controller) {
+    if (!controller) return NO;
+    if (ApolloDuoBookClassLooksLikeMedia(controller.class)) return YES;
+    if (ApolloDuoBookIsCommentsController(controller)) return YES;
+    return !ApolloDuoBookIsLeftPaneController(controller)
+        && !ApolloDuoBookIsFeedController(controller);
+}
+
+static void ApolloDuoBookDetachFromNav(UIViewController *controller) {
+    UINavigationController *nav = controller.navigationController;
+    if (!nav || !controller) return;
+    if (![nav.viewControllers containsObject:controller]) return;
+    NSMutableArray *stack = [nav.viewControllers mutableCopy];
+    [stack removeObject:controller];
+    sApolloDuoBookMutatingStack = YES;
+    [nav setViewControllers:stack animated:NO];
+    sApolloDuoBookMutatingStack = NO;
 }
 
 static void ApolloDuoBookRememberPending(UITabBarController *tabs, UIViewController *comments) {
@@ -568,9 +604,18 @@ static void ApolloDuoBookApplyGap(UITabBarController *tabs, CGRect feed, CGRect 
     line.frame = CGRectMake((width - lineW) * 0.5, 0.0, lineW, frame.size.height);
 }
 
+static void ApolloDuoBookRecoverStolenDetail(UITabBarController *tabs);
+
 static void ApolloDuoBookPinLeftContent(UITabBarController *tabs, int mode) {
     UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
     if (!posts.isViewLoaded || !posts.topViewController) return;
+    if (!ApolloDuoBookIsLeftPaneController(posts.topViewController)) {
+        ApolloDuoBookRecoverStolenDetail(tabs);
+        posts = ApolloDuoBookFindPostsNav(tabs);
+        if (!ApolloDuoBookIsLeftPaneController(posts.topViewController)) {
+            return;
+        }
+    }
     CGRect bounds = tabs.view.bounds;
     ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(bounds.size.width,
                                                               bounds.size.height,
@@ -802,6 +847,8 @@ static void ApolloDuoBookShowDetail(UITabBarController *tabs, UIViewController *
         return;
     }
 
+    ApolloDuoBookDetachFromNav(comments);
+
     UIViewController *host = ApolloDuoBookHost(tabs, YES);
     UIViewController *placeholder = objc_getAssociatedObject(tabs, &kApolloDuoBookPlaceholderKey);
     UIViewController *existingNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
@@ -870,6 +917,7 @@ static void ApolloDuoBookTearDown(UITabBarController *tabs, const char *why) {
 static void ApolloDuoBookApplyFrames(UITabBarController *tabs, int mode) {
     if (!tabs.isViewLoaded) return;
     if (!ApolloDuoBookShouldApplyFrames()) return;
+    ApolloDuoBookRecoverStolenDetail(tabs);
     sApolloDuoBookApplying = YES;
     CGRect bounds = tabs.view.bounds;
     ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(bounds.size.width,
@@ -933,37 +981,196 @@ int ApolloDuoBookCurrentHingeStatus(void) {
     return sApolloDuoBookHingeStatus;
 }
 
-BOOL ApolloDuoBookAdoptPush(UINavigationController *nav, UIViewController *viewController) {
-    if (!ApolloDuoBookIsActive() || !nav || !viewController) return NO;
-    UITabBarController *tabs = ApolloDuoBookTabs();
-    UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
-    if (nav != posts) return NO;
-    if (!ApolloDuoBookIsCommentsController(viewController)) return NO;
-
-    if (ApolloDuoBookAlreadyShows(tabs, viewController)) {
-        return YES;
+static void ApolloDuoBookPushOnDetail(UITabBarController *tabs, UIViewController *destination) {
+    if (!tabs || !destination) return;
+    UIViewController *detailNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
+    UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
+    if ([detailNav isKindOfClass:[UINavigationController class]]
+        && detailNav.parentViewController == host) {
+        UINavigationController *nav = (UINavigationController *)detailNav;
+        if ([nav.viewControllers containsObject:destination]) return;
+        ApolloDuoBookDetachFromNav(destination);
+        sApolloDuoBookMutatingStack = YES;
+        [nav pushViewController:destination animated:YES];
+        sApolloDuoBookMutatingStack = NO;
+        ApolloDuoBookApplyDetailInsets(host);
+        ApolloLog(@"[DuoBook] pushed %@ onto the right pane",
+                  NSStringFromClass(destination.class));
+        return;
     }
+    if (ApolloDuoBookIsCommentsController(destination)) {
+        ApolloDuoBookShowDetail(tabs, destination);
+    }
+}
 
-    BOOL feedOnStack = NO;
-    for (UIViewController *vc in nav.viewControllers) {
-        if (ApolloDuoBookIsFeedController(vc)) {
-            feedOnStack = YES;
-            break;
+static void ApolloDuoBookRecoverStolenDetail(UITabBarController *tabs) {
+    if (!tabs || !ApolloDuoBookIsActive()) return;
+    UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
+    if (!posts) return;
+
+    UIViewController *stolen = nil;
+    NSMutableArray *keep = [NSMutableArray array];
+    for (UIViewController *vc in posts.viewControllers) {
+        if (ApolloDuoBookIsCommentsController(vc)) {
+            stolen = vc;
+        } else if (ApolloDuoBookClassLooksLikeMedia(vc.class)) {
+            continue;
+        } else {
+            [keep addObject:vc];
         }
     }
-    if (!feedOnStack && !ApolloDuoBookIsFeedController(nav.topViewController)) {
-        ApolloLog(@"[DuoBook] comments push skipped (no feed on the posts nav)");
-        return NO;
+
+    if (keep.count != posts.viewControllers.count) {
+        sApolloDuoBookMutatingStack = YES;
+        [posts setViewControllers:keep animated:NO];
+        sApolloDuoBookMutatingStack = NO;
+        ApolloLog(@"[DuoBook] recovered stolen detail off the posts nav");
     }
 
-    // Host here only. Never Sync from a push — Sync during a rotate
-    // TearDowns (why=closed) and the unwrap push re-enters AdoptPush.
-    if (!ApolloDuoBookShouldApplyFrames()) {
-        ApolloDuoBookRememberPending(tabs, viewController);
+    if (stolen && !ApolloDuoBookAlreadyShows(tabs, stolen)) {
+        if (ApolloDuoBookIsCommentsController(stolen)) {
+            ApolloDuoBookShowDetail(tabs, stolen);
+        } else {
+            ApolloDuoBookPushOnDetail(tabs, stolen);
+        }
+    }
+
+    UIViewController *existing = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailKey);
+    UIViewController *existingNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
+    UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
+    if (existing && host && !ApolloDuoBookHostContains(tabs, existing)) {
+        ApolloDuoBookShowDetail(tabs, existing);
+        return;
+    }
+    if (existing.isViewLoaded && existingNav.isViewLoaded
+        && existing.view.superview != existingNav.view
+        && existing.navigationController == existingNav) {
+        existing.view.frame = existingNav.view.bounds;
+        existing.view.autoresizingMask = UIViewAutoresizingFlexibleWidth
+            | UIViewAutoresizingFlexibleHeight;
+        [existingNav.view addSubview:existing.view];
+        ApolloLog(@"[DuoBook] reattached comments.view to the right pane");
+    }
+}
+
+void ApolloDuoBookRecoverIfNeeded(void) {
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    if (!tabs || !ApolloDuoBookIsActive()) return;
+    ApolloDuoBookRecoverStolenDetail(tabs);
+}
+
+BOOL ApolloDuoBookAdoptPush(UINavigationController *nav, UIViewController *viewController) {
+    if (!ApolloDuoBookIsActive() || !nav || !viewController) return NO;
+    if (sApolloDuoBookMutatingStack) return NO;
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
+    UIViewController *detailNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
+
+    if (nav == detailNav) {
+        return NO;
+    }
+    if (nav != posts) return NO;
+    if (ApolloDuoBookClassLooksLikeMedia(viewController.class)) return NO;
+
+    if (ApolloDuoBookIsCommentsController(viewController)) {
+        if (ApolloDuoBookAlreadyShows(tabs, viewController)) {
+            return YES;
+        }
+
+        BOOL feedOnStack = NO;
+        for (UIViewController *vc in nav.viewControllers) {
+            if (ApolloDuoBookIsFeedController(vc)) {
+                feedOnStack = YES;
+                break;
+            }
+        }
+        if (!feedOnStack && !ApolloDuoBookIsFeedController(nav.topViewController)) {
+            ApolloLog(@"[DuoBook] comments push skipped (no feed on the posts nav)");
+            return NO;
+        }
+
+        // Host here only. Never Sync from a push — Sync during a rotate
+        // TearDowns (why=closed) and the unwrap push re-enters AdoptPush.
+        if (!ApolloDuoBookShouldApplyFrames()) {
+            ApolloDuoBookRememberPending(tabs, viewController);
+            return YES;
+        }
+        ApolloDuoBookShowDetail(tabs, viewController);
         return YES;
     }
-    ApolloDuoBookShowDetail(tabs, viewController);
-    return YES;
+
+    // In-post / nested destinations must not replace the feed column.
+    if (ApolloDuoBookIsDetailDestination(viewController)) {
+        ApolloDuoBookPushOnDetail(tabs, viewController);
+        return YES;
+    }
+    return NO;
+}
+
+BOOL ApolloDuoBookAdoptShow(UIViewController *source, UIViewController *destination) {
+    if (!ApolloDuoBookIsActive() || !destination) return NO;
+    if (sApolloDuoBookMutatingStack) return NO;
+    if (ApolloDuoBookClassLooksLikeMedia(destination.class)) return NO;
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
+    UIViewController *detailNav = objc_getAssociatedObject(tabs, &kApolloDuoBookDetailNavKey);
+    UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
+
+    BOOL fromDetail = ApolloDuoBookControllerInTree(source, host)
+        || ApolloDuoBookControllerInTree(source, detailNav);
+    if (fromDetail) {
+        ApolloDuoBookPushOnDetail(tabs, destination);
+        return YES;
+    }
+
+    BOOL fromPosts = ApolloDuoBookControllerInTree(source, posts);
+    if (fromPosts && ApolloDuoBookIsCommentsController(destination)) {
+        return ApolloDuoBookAdoptPush(posts, destination);
+    }
+    if (fromPosts && ApolloDuoBookIsDetailDestination(destination)) {
+        ApolloDuoBookPushOnDetail(tabs, destination);
+        return YES;
+    }
+    return NO;
+}
+
+NSArray *ApolloDuoBookAdoptPostsStack(UINavigationController *nav, NSArray *controllers) {
+    if (!ApolloDuoBookIsActive() || !nav || !controllers) return controllers;
+    if (sApolloDuoBookMutatingStack) return controllers;
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
+    if (nav != posts) return controllers;
+
+    UIViewController *stolen = nil;
+    NSMutableArray *keep = [NSMutableArray array];
+    BOOL stripped = NO;
+    for (id object in controllers) {
+        if (![object isKindOfClass:[UIViewController class]]) {
+            [keep addObject:object];
+            continue;
+        }
+        UIViewController *vc = (UIViewController *)object;
+        if (ApolloDuoBookIsCommentsController(vc)) {
+            stolen = vc;
+            stripped = YES;
+            continue;
+        }
+        if (ApolloDuoBookClassLooksLikeMedia(vc.class)) {
+            stripped = YES;
+            continue;
+        }
+        [keep addObject:vc];
+    }
+    if (!stripped) return controllers;
+    if (stolen) {
+        if (ApolloDuoBookIsCommentsController(stolen)) {
+            ApolloDuoBookShowDetail(tabs, stolen);
+        } else {
+            ApolloDuoBookPushOnDetail(tabs, stolen);
+        }
+    }
+    ApolloLog(@"[DuoBook] stripped detail off a posts-nav stack set");
+    return keep;
 }
 
 void ApolloDuoBookReassertFrames(void) {
