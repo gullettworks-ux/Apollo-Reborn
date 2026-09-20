@@ -35,6 +35,14 @@
     ApolloDuoBookSync();
 }
 
+- (void)viewDidLayoutSubviews {
+    %orig;
+    if (!ApolloDuoBookIsActive()) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        ApolloDuoBookReassertFrames();
+    });
+}
+
 %end
 
 %end

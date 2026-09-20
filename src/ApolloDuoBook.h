@@ -20,6 +20,10 @@ int ApolloDuoBookCurrentHingeStatus(void);
 /// (no-op when frames already match).
 void ApolloDuoBookSync(void);
 
+/// Re-pin the left-pane content and bring the right host to the front.
+/// Call after rail fill so UITabBarController cannot bury the split.
+void ApolloDuoBookReassertFrames(void);
+
 /// If the book split is live and `viewController` is a feed→post
 /// comments push, host it on the right and return YES (caller must
 /// skip %orig). Otherwise NO.

@@ -29,7 +29,9 @@ extern "C" {
 // When the hinge API is missing (older SDK, non-Duo, worker without
 // the class) status is Unknown. Unknown + Open still enables the
 // split so a landscape Duo sim without UIHingeInteraction is
-// reviewable. Unknown + Closed stays single-pane (V1).
+// reviewable. Closed hinge on an Open (wide) window also splits —
+// Duo sim reports hinge Closed on a fully-open landscape canvas.
+// Unknown + Closed *mode* (narrow portrait) stays single-pane (V1).
 //
 // Runtime tiling lives in ApolloDuoBook — not ApolloFeedSplit
 // (`ApolloFeedSplitEnabled` stays NO). FeedSplit math is reused
@@ -58,22 +60,22 @@ static inline int ApolloDuoHingeStatusFromUIKit(int raw) {
     return ApolloDuoHingeUnknown;
 }
 
-// Closed hinge always wins: a leftover wide window during fold must
-// tear the split down. Partially-open hinge on a Duo window is the
-// mid-open book even when bounds still look Closed (inner portrait
-// while the hinge is angled). Phone never becomes a book.
+// Window mode wins for fully-open. Duo sim reports UIHinge.status
+// Closed on a wide Open canvas; that must still split. Phone never
+// splits. True Closed portrait (narrow Closed mode) stays single-pane
+// unless the hinge is genuinely partiallyOpen (mid-open book).
 static inline int ApolloDuoBookPostureFromState(int duoMode, int hingeStatus) {
     if (duoMode == ApolloDuoModePhone) {
         return ApolloDuoBookPosturePhone;
     }
-    if (hingeStatus == ApolloDuoHingeClosed) {
-        return ApolloDuoBookPostureClosed;
+    if (duoMode == ApolloDuoModeOpen) {
+        if (hingeStatus == ApolloDuoHingePartiallyOpen) {
+            return ApolloDuoBookPostureMidOpenBook;
+        }
+        return ApolloDuoBookPostureFullyOpen;
     }
     if (hingeStatus == ApolloDuoHingePartiallyOpen) {
         return ApolloDuoBookPostureMidOpenBook;
-    }
-    if (duoMode == ApolloDuoModeOpen) {
-        return ApolloDuoBookPostureFullyOpen;
     }
     return ApolloDuoBookPostureClosed;
 }

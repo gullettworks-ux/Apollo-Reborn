@@ -63,8 +63,8 @@ int main(void) {
               == ApolloDuoBookPostureMidOpenBook,
           "Open landscape + partiallyOpen hinge is mid-open book");
     Check(ApolloDuoBookPostureFromState(ApolloDuoModeOpen, ApolloDuoHingeClosed)
-              == ApolloDuoBookPostureClosed,
-          "closed hinge tears the split down even if the window is still wide");
+              == ApolloDuoBookPostureFullyOpen,
+          "Open window is fully-open even when the Duo sim hinge reports Closed");
 
     Check(!ApolloDuoBookPostureAllowsSplit(ApolloDuoBookPosturePhone),
           "Phone posture cannot split");
@@ -118,10 +118,10 @@ int main(void) {
                                                   ApolloDuoHingePartiallyOpen,
                                                   1133.0, 744.0),
           "mid-open book on a landscape inner splits");
-    Check(!ApolloDuoBookSplitShouldEnableForWindow(ApolloDuoModeOpen,
-                                                   ApolloDuoHingeClosed,
-                                                   1133.0, 744.0),
-          "closed hinge wins over a leftover Open window");
+    Check(ApolloDuoBookSplitShouldEnableForWindow(ApolloDuoModeOpen,
+                                                  ApolloDuoHingeClosed,
+                                                  1133.0, 744.0),
+          "wide Open window splits even if the hinge still says Closed");
 
     Check(Near(ApolloDuoBookExtraLeftForMode(ApolloDuoModeOpen),
                ApolloDuoRailContentLeftInset()),

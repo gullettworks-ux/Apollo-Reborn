@@ -7,6 +7,7 @@
 
 #import "ApolloCommon.h"
 #import "ApolloDuoBook.h"
+#import "ApolloDuoBookLayout.h"
 #import "ApolloDuoCompatibility.h"
 #import "ApolloDeviceDisplay.h"
 #import "ApolloDeviceGeometry.h"
@@ -1097,19 +1098,39 @@ static void ApolloDuoRailFillController(UIViewController *controller, UIView *co
     }
 }
 
-void ApolloDuoRailFillPaneContent(UIViewController *controller, UIView *container) {
-    if (!controller || !container || !controller.isViewLoaded) return;
-    if (CGRectGetWidth(container.bounds) < 1.0 || CGRectGetHeight(container.bounds) < 1.0) {
-        return;
+static void ApolloDuoRailPinViewInRect(UIView *view, UIView *container, CGRect want) {
+    if (!view || !container || view == container) return;
+    UIView *parent = view.superview;
+    CGRect frame = want;
+    if (parent && parent != container) {
+        frame = [parent convertRect:want fromView:container];
     }
-    CGRect want = container.bounds;
+    if (CGRectGetWidth(frame) < 1.0 || CGRectGetHeight(frame) < 1.0) return;
+    // ExpandView forces FlexibleWidth, which grows the feed back to
+    // the full nav after UITabBarController layout. Book fill must
+    // keep a left pin so the right host stays visible.
+    view.autoresizingMask = UIViewAutoresizingFlexibleHeight
+        | UIViewAutoresizingFlexibleRightMargin;
+    if (fabs(CGRectGetMinX(view.frame) - CGRectGetMinX(frame)) >= 0.5
+        || fabs(CGRectGetMinY(view.frame) - CGRectGetMinY(frame)) >= 0.5
+        || fabs(CGRectGetWidth(view.frame) - CGRectGetWidth(frame)) >= 0.5
+        || fabs(CGRectGetHeight(view.frame) - CGRectGetHeight(frame)) >= 0.5) {
+        view.frame = frame;
+    }
+}
+
+void ApolloDuoRailFillPaneContentInRect(UIViewController *controller,
+                                        UIView *container,
+                                        CGRect want) {
+    if (!controller || !container || !controller.isViewLoaded) return;
+    if (CGRectGetWidth(want) < 1.0 || CGRectGetHeight(want) < 1.0) return;
     UIView *layout = ApolloDuoRailLayoutView(controller, container);
     if (layout && layout != container) {
-        ApolloDuoRailExpandView(layout, want);
+        ApolloDuoRailPinViewInRect(layout, container, want);
     }
     UIView *view = controller.view;
     if (view && view != layout && view != container) {
-        ApolloDuoRailExpandView(view, layout && layout != view ? layout.bounds : want);
+        ApolloDuoRailPinViewInRect(view, container, want);
     }
     if ([controller respondsToSelector:@selector(tableView)]) {
         UIView *table = nil;
@@ -1119,21 +1140,20 @@ void ApolloDuoRailFillPaneContent(UIViewController *controller, UIView *containe
             table = nil;
         }
         if ([table isKindOfClass:[UIScrollView class]]) {
-            UIView *tableParent = table.superview ?: view;
-            if (tableParent == container) {
-                ApolloDuoRailExpandView(table, want);
-            } else if (tableParent && tableParent != container) {
-                table.autoresizingMask = UIViewAutoresizingFlexibleWidth
-                    | UIViewAutoresizingFlexibleHeight;
-                table.frame = tableParent.bounds;
-            }
+            ApolloDuoRailPinViewInRect(table, container, want);
             ApolloDuoRailApplyListInsets((UIScrollView *)table);
         }
     }
     UIScrollView *found = ApolloDuoRailFindPrimaryTable(view ?: layout, 5);
     if (found) {
+        ApolloDuoRailPinViewInRect(found, container, want);
         ApolloDuoRailApplyListInsets(found);
     }
+}
+
+void ApolloDuoRailFillPaneContent(UIViewController *controller, UIView *container) {
+    if (!container) return;
+    ApolloDuoRailFillPaneContentInRect(controller, container, container.bounds);
 }
 
 void ApolloDuoRailFillOpenContent(void) {
@@ -1145,10 +1165,18 @@ void ApolloDuoRailFillOpenContent(void) {
     UIView *container = nav.view ?: tabs.view;
     UIViewController *top = nav.topViewController;
     if (!top) return;
-    // Book already sized the posts nav to the left pane. Fill children
-    // into that pane — do not run the full-window +120 rail frame again.
+    // Book overlays the right host and pins list/feed to the left
+    // half. Do not run the full-window +120 rail expand.
     if (ApolloDuoBookIsActive()) {
-        ApolloDuoRailFillPaneContent(top, container);
+        ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(tabs.view.bounds.size.width,
+                                                                  tabs.view.bounds.size.height,
+                                                                  ApolloDuoCurrentMode());
+        CGRect feed = CGRectMake((CGFloat)frames.feed.x, (CGFloat)frames.feed.y,
+                                 (CGFloat)frames.feed.width, (CGFloat)frames.feed.height);
+        CGRect inNav = [container convertRect:feed fromView:tabs.view];
+        if (CGRectGetWidth(inNav) < 1.0) inNav = feed;
+        ApolloDuoRailFillPaneContentInRect(top, container, inNav);
+        ApolloDuoBookReassertFrames();
         return;
     }
     if (!ApolloDuoRailIsActive()) return;

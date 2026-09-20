@@ -36,8 +36,12 @@ UINavigationController *ApolloDuoRailPostsNavigationController(UITabBarControlle
 void ApolloDuoRailFillOpenContent(void);
 
 /// Fill `controller` to `container.bounds` and re-apply list insets.
-/// Used for the book left pane, whose origin already clears the rail.
 void ApolloDuoRailFillPaneContent(UIViewController *controller, UIView *container);
+
+/// Fill `controller` to `rect` in `container` bounds (book left pane).
+void ApolloDuoRailFillPaneContentInRect(UIViewController *controller,
+                                        UIView *container,
+                                        CGRect rect);
 
 /// Restore full-bleed frames / insets when the rail hides. Walks every
 /// tab nav stack so a leftover leading strip cannot survive Compact

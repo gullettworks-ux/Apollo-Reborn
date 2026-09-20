@@ -30,6 +30,14 @@ static char kApolloDuoBookSavedNavFrameKey;
 static int sApolloDuoBookHingeStatus = ApolloDuoHingeUnknown;
 static BOOL sApolloDuoBookHingeInstalled = NO;
 static BOOL sApolloDuoBookHingeLogged = NO;
+static unsigned sApolloDuoBookHingeEvents = 0;
+static int sApolloDuoBookLastLogMode = -1;
+static int sApolloDuoBookLastLogHinge = -1;
+static int sApolloDuoBookLastLogPosture = -1;
+static int sApolloDuoBookLastLogWant = -1;
+static int sApolloDuoBookLastLogPosts = -1;
+static double sApolloDuoBookLastLogUsable = -1.0;
+static CFAbsoluteTime sApolloDuoBookLastLogAt = 0.0;
 
 @interface ApolloDuoBookPlaceholderViewController : UIViewController
 @end
@@ -119,10 +127,45 @@ static UINavigationController *ApolloDuoBookFindPostsNav(UITabBarController *tab
 }
 
 static int ApolloDuoBookLiveDuoMode(void) {
-    int mode = ApolloDuoCurrentMode();
-    if (mode != ApolloDuoModePhone) return mode;
-    UIWindow *window = ApolloDeviceAppWindow();
-    return ApolloDuoModeFromWindow(window, 0);
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    UIWindow *window = (tabs.isViewLoaded && tabs.view.window)
+        ? tabs.view.window : ApolloDeviceAppWindow();
+    int stored = ApolloDuoCurrentMode();
+    int dual = (stored != ApolloDuoModePhone) ? 1 : 0;
+    int fromWindow = ApolloDuoModeFromWindow(window, dual);
+    if (fromWindow == ApolloDuoModeOpen || stored == ApolloDuoModeOpen) {
+        return ApolloDuoModeOpen;
+    }
+    if (fromWindow == ApolloDuoModeClosed || stored == ApolloDuoModeClosed) {
+        return ApolloDuoModeClosed;
+    }
+    return ApolloDuoModePhone;
+}
+
+static void ApolloDuoBookLogDecision(int duoMode,
+                                     int hinge,
+                                     int posture,
+                                     double usable,
+                                     int onPostsTab,
+                                     int want,
+                                     const char *why) {
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    int changed = (duoMode != sApolloDuoBookLastLogMode)
+        || (hinge != sApolloDuoBookLastLogHinge)
+        || (posture != sApolloDuoBookLastLogPosture)
+        || (want != sApolloDuoBookLastLogWant)
+        || (onPostsTab != sApolloDuoBookLastLogPosts)
+        || (fabs(usable - sApolloDuoBookLastLogUsable) > 0.5);
+    if (!changed && (now - sApolloDuoBookLastLogAt) < 2.0) return;
+    sApolloDuoBookLastLogMode = duoMode;
+    sApolloDuoBookLastLogHinge = hinge;
+    sApolloDuoBookLastLogPosture = posture;
+    sApolloDuoBookLastLogWant = want;
+    sApolloDuoBookLastLogPosts = onPostsTab;
+    sApolloDuoBookLastLogUsable = usable;
+    sApolloDuoBookLastLogAt = now;
+    ApolloLog(@"[DuoBook] sync mode=%d hinge=%d posture=%d usable=%.0f onPostsTab=%d want=%d why=%s",
+              duoMode, hinge, posture, usable, onPostsTab, want, why ?: "-");
 }
 
 static int ApolloDuoBookMapHingeObject(id hinge) {
@@ -144,10 +187,14 @@ static int ApolloDuoBookMapHingeObject(id hinge) {
 }
 
 static void ApolloDuoBookSetHingeStatus(int status, const char *why) {
-    if (status == sApolloDuoBookHingeStatus) return;
     int previous = sApolloDuoBookHingeStatus;
+    sApolloDuoBookHingeEvents++;
+    if (status != sApolloDuoBookHingeStatus || sApolloDuoBookHingeEvents <= 3) {
+        ApolloLog(@"[DuoBook] hinge %d → %d (%s event=%u)",
+                  previous, status, why ?: "update", sApolloDuoBookHingeEvents);
+    }
+    if (status == sApolloDuoBookHingeStatus) return;
     sApolloDuoBookHingeStatus = status;
-    ApolloLog(@"[DuoBook] hinge %d → %d (%s)", previous, status, why ?: "update");
     ApolloDuoCompatibilityFillSoon();
 }
 
@@ -163,7 +210,11 @@ static void ApolloDuoBookInstallHinge(UIView *view) {
     }
     sApolloDuoBookHingeInstalled = YES;
 
-    void (^handler)(id) = ^(id hinge) {
+    void (^handler1)(id) = ^(id hinge) {
+        ApolloDuoBookSetHingeStatus(ApolloDuoBookMapHingeObject(hinge), "UIHingeInteraction");
+    };
+    void (^handler2)(id, id) = ^(id interaction, id hinge) {
+        (void)interaction;
         ApolloDuoBookSetHingeStatus(ApolloDuoBookMapHingeObject(hinge), "UIHingeInteraction");
     };
 
@@ -172,36 +223,84 @@ static void ApolloDuoBookInstallHinge(UIView *view) {
     SEL initHingeHandler = NSSelectorFromString(@"initWithHandler:");
     if ([interactionClass instancesRespondToSelector:initHandler]) {
         interaction = ((id (*)(id, SEL, id))objc_msgSend)(
-            [interactionClass alloc], initHandler, handler);
+            [interactionClass alloc], initHandler, handler2);
     } else if ([interactionClass instancesRespondToSelector:initHingeHandler]) {
         interaction = ((id (*)(id, SEL, id))objc_msgSend)(
-            [interactionClass alloc], initHingeHandler, handler);
+            [interactionClass alloc], initHingeHandler, handler1);
     } else {
         interaction = [[interactionClass alloc] init];
         if ([interaction respondsToSelector:NSSelectorFromString(@"setUpdateHandler:")]) {
             ((void (*)(id, SEL, id))objc_msgSend)(
-                interaction, NSSelectorFromString(@"setUpdateHandler:"), handler);
+                interaction, NSSelectorFromString(@"setUpdateHandler:"), handler2);
         }
     }
     if (interaction && [view respondsToSelector:@selector(addInteraction:)]) {
         [view addInteraction:interaction];
+        id live = nil;
+        if ([interaction respondsToSelector:@selector(hinge)]) {
+            live = ((id (*)(id, SEL))objc_msgSend)(interaction, @selector(hinge));
+        }
+        if (live) {
+            ApolloDuoBookSetHingeStatus(ApolloDuoBookMapHingeObject(live), "install-read");
+        }
         if (!sApolloDuoBookHingeLogged) {
             sApolloDuoBookHingeLogged = YES;
-            ApolloLog(@"[DuoBook] UIHingeInteraction installed on %@", NSStringFromClass(view.class));
+            ApolloLog(@"[DuoBook] UIHingeInteraction installed on %@ hinge=%d",
+                      NSStringFromClass(view.class), sApolloDuoBookHingeStatus);
         }
     }
 }
 
-static void ApolloDuoBookApplyFrame(UIView *view, CGRect frame) {
+static void ApolloDuoBookApplyFrame(UIView *view, CGRect frame, UIViewAutoresizing mask) {
     if (!view || CGRectGetWidth(frame) < 1.0 || CGRectGetHeight(frame) < 1.0) return;
+    view.autoresizingMask = mask;
     if (fabs(CGRectGetMinX(view.frame) - CGRectGetMinX(frame)) < 0.5
         && fabs(CGRectGetMinY(view.frame) - CGRectGetMinY(frame)) < 0.5
         && fabs(CGRectGetWidth(view.frame) - CGRectGetWidth(frame)) < 0.5
         && fabs(CGRectGetHeight(view.frame) - CGRectGetHeight(frame)) < 0.5) {
         return;
     }
-    view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     view.frame = frame;
+}
+
+static UIViewAutoresizing ApolloDuoBookPinRightMask(void) {
+    return UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleLeftMargin;
+}
+
+static UIViewAutoresizing ApolloDuoBookFillMask(void) {
+    return UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+}
+
+static void ApolloDuoBookBringChromeFront(UITabBarController *tabs) {
+    UIViewController *host = objc_getAssociatedObject(tabs, &kApolloDuoBookHostKey);
+    if (host.view.superview == tabs.view) {
+        [tabs.view bringSubviewToFront:host.view];
+    }
+    for (UIView *subview in tabs.view.subviews) {
+        const char *name = class_getName(subview.class);
+        if (name && strstr(name, "ApolloDuoRail")) {
+            [tabs.view bringSubviewToFront:subview];
+            break;
+        }
+    }
+}
+
+static void ApolloDuoBookPinLeftContent(UITabBarController *tabs, int mode) {
+    UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
+    if (!posts.isViewLoaded || !posts.topViewController) return;
+    CGRect bounds = tabs.view.bounds;
+    ApolloFeedSplitFrames frames = ApolloDuoBookFramesForMode(bounds.size.width,
+                                                              bounds.size.height,
+                                                              mode);
+    CGRect feed = CGRectMake((CGFloat)frames.feed.x, (CGFloat)frames.feed.y,
+                             (CGFloat)frames.feed.width, (CGFloat)frames.feed.height);
+    UIView *container = posts.view;
+    CGRect inNav = [container convertRect:feed fromView:tabs.view];
+    if (CGRectGetWidth(inNav) < 1.0 || CGRectGetHeight(inNav) < 1.0) {
+        inNav = feed;
+    }
+    ApolloDuoRailFillPaneContentInRect(posts.topViewController, container, inNav);
+    ApolloDuoSubsChromeApply(posts.topViewController);
 }
 
 static UIViewController *ApolloDuoBookHost(UITabBarController *tabs, BOOL create) {
@@ -312,7 +411,7 @@ static void ApolloDuoBookRestorePostsNav(UITabBarController *tabs) {
     if (!posts || !posts.isViewLoaded) return;
     UIView *superview = posts.view.superview;
     if (superview) {
-        ApolloDuoBookApplyFrame(posts.view, superview.bounds);
+        ApolloDuoBookApplyFrame(posts.view, superview.bounds, ApolloDuoBookFillMask());
     }
     objc_setAssociatedObject(posts, &kApolloDuoBookSavedNavFrameKey, nil,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -345,47 +444,26 @@ static void ApolloDuoBookApplyFrames(UITabBarController *tabs, int mode) {
         return;
     }
 
-    UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
-    if (posts.isViewLoaded && posts.view.superview) {
-        if (!objc_getAssociatedObject(posts, &kApolloDuoBookSavedNavFrameKey)) {
-            objc_setAssociatedObject(posts, &kApolloDuoBookSavedNavFrameKey,
-                                     [NSValue valueWithCGRect:posts.view.frame],
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
-        CGRect feedFrame = CGRectMake(frames.feed.x, frames.feed.y,
-                                      frames.feed.width, frames.feed.height);
-        ApolloDuoBookApplyFrame(posts.view, feedFrame);
-    }
-
+    // Do not shrink posts.view. UITabBarController resets the selected
+    // child's frame to full bounds on every layout, which undoes a
+    // half-width nav and then V1 rail fill expands the feed again.
+    // Overlay the host on the right and pin list/feed content left.
     UIViewController *host = ApolloDuoBookHost(tabs, YES);
     if (host.parentViewController != tabs) {
         [tabs addChildViewController:host];
         [tabs.view addSubview:host.view];
         [host didMoveToParentViewController:tabs];
     }
-    CGRect detailFrame = CGRectMake(frames.detail.x, frames.detail.y,
-                                    frames.detail.width, frames.detail.height);
-    ApolloDuoBookApplyFrame(host.view, detailFrame);
+    CGRect detailFrame = CGRectMake((CGFloat)frames.detail.x, (CGFloat)frames.detail.y,
+                                    (CGFloat)frames.detail.width, (CGFloat)frames.detail.height);
+    ApolloDuoBookApplyFrame(host.view, detailFrame, ApolloDuoBookPinRightMask());
     UIViewController *child = host.childViewControllers.firstObject;
     if (child.isViewLoaded) {
-        ApolloDuoBookApplyFrame(child.view, host.view.bounds);
+        ApolloDuoBookApplyFrame(child.view, host.view.bounds, ApolloDuoBookFillMask());
     }
 
-    UIView *rail = nil;
-    for (UIView *subview in tabs.view.subviews) {
-        const char *name = class_getName(subview.class);
-        if (name && strstr(name, "ApolloDuoRail")) {
-            rail = subview;
-            break;
-        }
-    }
-    if (rail) [tabs.view bringSubviewToFront:rail];
-
-    // V1 rail fill + Subs chrome, now against the left pane bounds.
-    if (posts.topViewController) {
-        ApolloDuoRailFillPaneContent(posts.topViewController, posts.view);
-        ApolloDuoSubsChromeApply(posts.topViewController);
-    }
+    ApolloDuoBookPinLeftContent(tabs, mode);
+    ApolloDuoBookBringChromeFront(tabs);
 }
 
 BOOL ApolloDuoBookIsActive(void) {
@@ -429,31 +507,55 @@ BOOL ApolloDuoBookAdoptPush(UINavigationController *nav, UIViewController *viewC
     return YES;
 }
 
+void ApolloDuoBookReassertFrames(void) {
+    UITabBarController *tabs = ApolloDuoBookTabs();
+    if (!tabs || !ApolloDuoBookIsActive()) return;
+    ApolloDuoBookApplyFrames(tabs, ApolloDuoBookLiveDuoMode());
+}
+
 void ApolloDuoBookSync(void) {
     UITabBarController *tabs = ApolloDuoBookTabs();
-    if (!tabs || !tabs.isViewLoaded) return;
+    if (!tabs || !tabs.isViewLoaded) {
+        ApolloDuoBookLogDecision(ApolloDuoCurrentMode(), sApolloDuoBookHingeStatus,
+                                 ApolloDuoBookPosturePhone, 0.0, 0, 0, "tabs-unready");
+        return;
+    }
 
     ApolloDuoBookInstallHinge(tabs.view.window ?: tabs.view);
 
     int duoMode = ApolloDuoBookLiveDuoMode();
     int posture = ApolloDuoBookPostureFromState(duoMode, sApolloDuoBookHingeStatus);
     CGSize size = tabs.view.bounds.size;
+    UIWindow *window = (tabs.isViewLoaded && tabs.view.window)
+        ? tabs.view.window : ApolloDeviceAppWindow();
+    if (window && window.bounds.size.width > size.width + 0.5) {
+        size = window.bounds.size;
+    }
     double extraLeft = ApolloDuoBookExtraLeftForMode(duoMode);
     double extraRight = ApolloDuoBookExtraRightForMode(duoMode);
     double usable = ApolloFeedSplitUsableWidth(size.width, extraLeft, extraRight);
     UINavigationController *posts = ApolloDuoBookFindPostsNav(tabs);
     UINavigationController *selected = ApolloDuoBookNavFromController(tabs.selectedViewController);
-    BOOL onPostsTab = posts && selected && posts == selected;
-    BOOL want = onPostsTab
-        && ApolloDuoBookSplitShouldEnable(posture, usable) ? YES : NO;
+    BOOL onPostsTab = posts && selected && (posts == selected
+        || [posts.viewControllers containsObject:tabs.selectedViewController]);
+    BOOL wideEnough = ApolloDuoBookSplitShouldEnable(posture, usable) ? YES : NO;
+    BOOL want = onPostsTab && wideEnough;
+    const char *why = "split";
+    if (duoMode == ApolloDuoModePhone) {
+        why = "phone";
+    } else if (!onPostsTab) {
+        why = "not-posts-tab";
+    } else if (!wideEnough) {
+        why = ApolloDuoBookPostureAllowsSplit(posture) ? "narrow" : "closed";
+    }
 
     objc_setAssociatedObject(tabs, &kApolloDuoBookPostureKey, @(posture),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    ApolloDuoBookLogDecision(duoMode, sApolloDuoBookHingeStatus, posture,
+                             usable, onPostsTab ? 1 : 0, want ? 1 : 0, why);
 
     if (!want) {
-        ApolloDuoBookTearDown(tabs, duoMode == ApolloDuoModePhone ? "phone"
-                               : posture == ApolloDuoBookPostureClosed ? "closed"
-                               : "narrow");
+        ApolloDuoBookTearDown(tabs, why);
         return;
     }
 

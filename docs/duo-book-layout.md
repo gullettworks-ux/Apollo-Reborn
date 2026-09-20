@@ -22,8 +22,8 @@ modified.
 | Posture | How it is detected | Split |
 | --- | --- | --- |
 | **Phone** | `ApolloDuoModePhone` (not dual-display, `MAX(w,h) ≤ 1000`) | Never. Hinge reports are ignored. |
-| **Closed** | Portrait-sized Duo window, **or** `UIHinge.status == closed` | Never. A leftover wide window during fold still tears down. |
-| **Fully open** | `ApolloDuoModeOpen` (wide **landscape** window) and hinge is not closed | Yes. If `UIHingeInteraction` is missing, Open alone is enough (Duo sim / older SDK). |
+| **Closed** | Portrait-sized Duo window (`ApolloDuoModeClosed`) | Never, unless the hinge is genuinely `partiallyOpen`. |
+| **Fully open** | `ApolloDuoModeOpen` (wide **landscape** window) | Yes, even if `UIHinge.status` is Closed or Unknown. Duo sim reports hinge Closed on a fully-open canvas. |
 | **Mid-open book** | `UIHinge.status == partiallyOpen` on a Duo window | Yes, only when usable width ≥ 652pt (two 320pt columns + gutter). A cover-narrow canvas stays single-pane. |
 
 Detection lives in `src/ApolloDuoBookLayout.h` (`ApolloDuoBookPostureFromState`,
@@ -41,9 +41,11 @@ Runtime hinge install (`src/ApolloDuoBook.m`):
 4. If the class is missing, hinge stays Unknown and only fully-open
    landscape (`ApolloDuoModeOpen`) enables the split.
 
-Logs: `[DuoBook] shown posture=… mode=… hinge=…`,
+Logs (rate-limited): `[DuoBook] sync mode=… hinge=… posture=… usable=… onPostsTab=… want=… why=…`,
+`[DuoBook] shown posture=…`,
+`[DuoBook] hinge X → Y`,
 `[DuoBook] hosted CommentsViewController…`,
-`[DuoBook] torn down (closed|phone|narrow)`.
+`[DuoBook] torn down (closed|phone|narrow|not-posts-tab)`.
 
 ## Layout
 
@@ -51,9 +53,10 @@ Left pane = current posts nav (list or feed). Right pane = placeholder
 until a post is selected, then that post’s `CommentsViewController`.
 
 Frames reuse `ApolloFeedSplitFramesMake` (balanced, pin-leading) with
-Open’s leading-rail extra (120pt). The posts nav’s view is resized to
-the left rect; the detail host is a child of the tab controller on the
-right. The rail stays in front.
+Open’s leading-rail extra (120pt). The posts nav stays full-window
+(`UITabBarController` resets the selected child’s frame). List/feed
+content is pinned to the left half (`FlexibleHeight|FlexibleRightMargin`);
+the detail host overlays the right half. The rail stays in front.
 
 Once the posts nav is the left pane, V1 `ApolloDuoRailFillPaneContent`
 fills the visible feed/list into `nav.bounds` (no second +120 rail
