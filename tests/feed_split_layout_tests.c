@@ -274,6 +274,32 @@ int main(void) {
     Check(Near(hinged.detail.x, 510.0) && Near(hinged.detail.width, 490.0),
           "hinge-aware comments start after the reserved gap");
 
+    ApolloDuoSplitColumns book = ApolloDuoSplitColumnsMake(
+        1000.0, (double)ApolloDuoSplitRailWidth, (double)ApolloDuoSplitHingeGap);
+    Check(Near(book.railX, 0.0) && Near(book.railWidth, 88.0),
+          "book rail is a narrow leading column on the left screen");
+    Check(Near(book.feedX, 88.0) && Near(book.feedX + book.feedWidth, 494.0),
+          "book feed fills the left screen after the rail, stopping at the hinge gap");
+    Check(Near(book.hingeX, 500.0) && Near(book.detailX, 506.0),
+          "book detail starts just right of the hinge centre");
+    Check(Near(book.detailX + book.detailWidth, 1000.0),
+          "book detail reaches the physical right edge");
+    Check(book.feedX + book.feedWidth <= book.hingeX
+              && book.detailX >= book.hingeX,
+          "no book column spans the hinge");
+    Check(Near(book.detailWidth, 494.0) && Near(book.feedX + book.feedWidth - 0.0, 494.0),
+          "book detail is the same width as the left screen");
+
+    ApolloDuoSplitColumns squeezed = ApolloDuoSplitColumnsMake(
+        600.0, (double)ApolloDuoSplitRailWidth, (double)ApolloDuoSplitHingeGap);
+    Check(squeezed.feedWidth + 0.5 >= (double)ApolloDuoSplitFeedMinWidth,
+          "a narrow canvas shrinks the rail before the feed");
+    Check(squeezed.railWidth < 88.0 && squeezed.railWidth >= 0.0,
+          "squeezed rail stays non-negative");
+    ApolloDuoSplitColumns empty = ApolloDuoSplitColumnsMake(0.0, 88.0, 12.0);
+    Check(Near(empty.feedWidth, 0.0) && Near(empty.detailWidth, 0.0),
+          "zero-width canvas yields empty columns");
+
     printf("OK: %u checks\n", checks);
     return 0;
 }

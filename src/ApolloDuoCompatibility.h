@@ -21,7 +21,11 @@ extern "C" {
 // a normal phone portrait is not treated as Closed.
 
 enum {
-    ApolloDuoWideWindowThreshold = 1000, /* points; MAX(w,h) must be greater */
+    ApolloDuoWideWindowThreshold = 850, /* points; Duo simulator inner canvas */
+    /* Phones top out at 440pt on their short side (Pro Max = 430), so a
+       lower 850pt gate needs this floor to keep Max landscape (932x430)
+       from being read as an open Duo. */
+    ApolloDuoWideWindowMinShortSide = 500,
     ApolloDuoModePhone = 0,
     ApolloDuoModeClosed = 1,
     ApolloDuoModeOpen = 2,
@@ -29,7 +33,9 @@ enum {
 
 static inline int ApolloDuoIsWideBounds(double width, double height) {
     double max = width > height ? width : height;
-    return max > (double)ApolloDuoWideWindowThreshold;
+    double min = width > height ? height : width;
+    return max > (double)ApolloDuoWideWindowThreshold
+        && min >= (double)ApolloDuoWideWindowMinShortSide;
 }
 
 static inline int ApolloDuoIsLandscapeSized(double width, double height) {
@@ -37,7 +43,7 @@ static inline int ApolloDuoIsLandscapeSized(double width, double height) {
 }
 
 // dualDisplay is cover+inner (area ratio), not UIDevice orientation.
-// wide is MAX(window w,h) > 1000. Neither reads UIScreen.mainScreen.
+// wide is MAX(window w,h) > 850 and MIN(w,h) >= 500. Neither reads UIScreen.mainScreen.
 static inline int ApolloDuoModeFromBounds(int dualDisplay,
                                           double width,
                                           double height) {
@@ -80,7 +86,7 @@ static inline int ApolloDuoNeedsCanvasFill(double windowWidth,
 static inline BOOL ApolloDuoIsWideWindow(UIWindow *window) {
     if (!window) return NO;
     CGSize size = window.bounds.size;
-    return MAX(size.width, size.height) > 1000.0;
+    return ApolloDuoIsWideBounds(size.width, size.height) ? YES : NO;
 }
 
 static inline int ApolloDuoModeFromWindow(UIWindow *window, int dualDisplay) {

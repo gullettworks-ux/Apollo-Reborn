@@ -390,6 +390,50 @@ static inline ApolloFeedSplitFrames ApolloFeedSplitFramesMake(double containerWi
     return frames;
 }
 
+// Open-Duo "book" columns. The hinge is the geometric middle of the canvas:
+// the left physical screen holds the icon rail plus the feed, and the right
+// physical screen holds the selected post/comments. Nothing spans the hinge.
+enum {
+    ApolloDuoSplitRailWidth = 88,
+    ApolloDuoSplitHingeGap = 12,
+    ApolloDuoSplitFeedMinWidth = 240,
+};
+
+typedef struct {
+    double railX;
+    double railWidth;
+    double feedX;
+    double feedWidth;
+    double hingeX;      /* centre of the hinge gap */
+    double detailX;
+    double detailWidth;
+} ApolloDuoSplitColumns;
+
+static inline ApolloDuoSplitColumns ApolloDuoSplitColumnsMake(double containerWidth,
+                                                              double railWidth,
+                                                              double hingeGap) {
+    ApolloDuoSplitColumns c = {0, 0, 0, 0, 0, 0, 0};
+    if (containerWidth <= 0.0) return c;
+    if (hingeGap < 0.0) hingeGap = 0.0;
+    double mid = containerWidth * 0.5;
+    double halfGap = hingeGap * 0.5;
+    double leftPane = mid - halfGap;
+    if (railWidth < 0.0) railWidth = 0.0;
+    /* Never let the rail squeeze the feed below its minimum. */
+    if (leftPane - railWidth < (double)ApolloDuoSplitFeedMinWidth) {
+        railWidth = leftPane - (double)ApolloDuoSplitFeedMinWidth;
+        if (railWidth < 0.0) railWidth = 0.0;
+    }
+    c.railX = 0.0;
+    c.railWidth = railWidth;
+    c.feedX = railWidth;
+    c.feedWidth = leftPane - railWidth;
+    c.hingeX = mid;
+    c.detailX = mid + halfGap;
+    c.detailWidth = containerWidth - c.detailX;
+    return c;
+}
+
 #ifdef __cplusplus
 }
 #endif

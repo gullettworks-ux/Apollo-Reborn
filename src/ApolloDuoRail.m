@@ -13,6 +13,10 @@
 #import "ApolloFeedSplitLayout.h"
 #import "ApolloThemeRuntime.h"
 
+// The open-Duo split host must attach after this rail has finished installing
+// and bringing its own chrome to the front.
+extern void ApolloFeedSplitReapplySoon(void);
+
 // One Duo chrome path. Open Duo (wide landscape UIWindow) is a
 // reserved leading 112pt sidebar and hides UITabBar. Closed Duo
 // (portrait-sized Duo window) is Phone-like: stock bottom tab bar,
@@ -56,6 +60,7 @@ static char kApolloDuoRailRowLeadingClaimedKey;
 static char kApolloDuoRailRowDisabledConstraintsKey;
 static BOOL sApolloDuoRailPickingSubreddits = NO;
 static BOOL sApolloDuoRailOpenedDefaultDirectory = NO;
+static BOOL sApolloDuoRailSplitSuppressed = NO;
 
 BOOL ApolloDuoRailIsPickingSubreddits(void) {
     return sApolloDuoRailPickingSubreddits;
@@ -1182,6 +1187,22 @@ void ApolloDuoRailSync(void) {
     UITabBarController *tabs = (UITabBarController *)ApolloMainTabBarController();
     if (![tabs isKindOfClass:[UITabBarController class]] || !tabs.isViewLoaded) return;
 
+    // Once the three-pane host owns the open Duo canvas, the legacy rail must
+    // stop resizing Apollo's native feed. Continuing to fill the old phone
+    // column causes the center pane to flicker and collapse to ~200pt.
+    if (ApolloFeedSplitEnabled()) {
+        ApolloDuoRailView *splitRail = objc_getAssociatedObject(tabs, &kApolloDuoRailViewKey);
+        if (splitRail.superview) [splitRail removeFromSuperview];
+        if (!sApolloDuoRailSplitSuppressed) {
+            sApolloDuoRailSplitSuppressed = YES;
+            ApolloDuoRailClearOpenContent();
+        }
+        objc_setAssociatedObject(tabs, &kApolloDuoRailActiveKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+    sApolloDuoRailSplitSuppressed = NO;
+
     int mode = ApolloDuoRailModeForTabs(tabs);
     BOOL show = mode == ApolloDuoModeOpen;
     ApolloDuoRailView *rail = objc_getAssociatedObject(tabs, &kApolloDuoRailViewKey);
@@ -1263,4 +1284,5 @@ void ApolloDuoRailSync(void) {
         }
     }
     ApolloDuoSubsChromeApplyToTabs(tabs);
+    ApolloFeedSplitReapplySoon();
 }
