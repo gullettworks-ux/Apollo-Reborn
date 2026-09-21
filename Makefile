@@ -523,3 +523,18 @@ endif
 
 include $(THEOS_MAKE_PATH)/aggregate.mk
 include $(THEOS_MAKE_PATH)/tweak.mk
+
+# Theos's own rules.mk defines a generic implicit rule `%.m: %.xm` (runs
+# logos.pl and overwrites $@) so a hook file can exist as only a .xm with no
+# real .m. Several of our files are intentionally split into a real,
+# hand-written FooBar.m (plain ObjC helpers) plus a FooBar.xm (Logos hooks)
+# that shares the same basename. Whenever FooBar.xm's mtime is newer than
+# FooBar.m's (e.g. right after `git checkout`), Make treats FooBar.m as
+# stale and silently regenerates/overwrites it with logos.pl's *generated
+# hook glue*, destroying the real hand-written source with no warning. This
+# clobbered ApolloDeviceDisplay.m and ApolloDuoSubsChrome.m in the wild.
+# Neutralize the implicit rule (must come after the tweak.mk include above,
+# since GNU Make lets a later pattern-rule definition replace an earlier one
+# for the same stem/prerequisite pair).
+%.m: %.xm
+	@:
