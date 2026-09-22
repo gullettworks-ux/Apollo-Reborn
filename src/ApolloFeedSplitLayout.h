@@ -394,7 +394,12 @@ static inline ApolloFeedSplitFrames ApolloFeedSplitFramesMake(double containerWi
 // the left physical screen holds the icon rail plus the feed, and the right
 // physical screen holds the selected post/comments. Nothing spans the hinge.
 enum {
-    ApolloDuoSplitRailWidth = 88,
+    // Icon-over-label column, matching the reference render's slim
+    // proportion. A wider (130pt) version was tried but reverted — it broke
+    // the Subreddits directory screen (not yet root-caused) and wasn't
+    // actually wanted. ApolloDuoSplitColumnsMake's ApolloDuoSplitFeedMinWidth
+    // floor still protects the feed column regardless of this value.
+    ApolloDuoSplitRailWidth = 100,
     ApolloDuoSplitHingeGap = 12,
     ApolloDuoSplitFeedMinWidth = 240,
 };
@@ -444,6 +449,15 @@ static inline ApolloDuoSplitColumns ApolloDuoSplitColumnsMake(double containerWi
 __BEGIN_DECLS
 /// Runtime column tiling. Always NO after the architecture reset.
 BOOL ApolloFeedSplitEnabled(void);
+
+/// YES while the split host is intentionally detached for a non-split tab
+/// (Profile/Settings) but Open Duo book layout is still the active feature —
+/// distinct from FeedSplitEnabled being NO because Duo isn't Open at all.
+/// Callers that fall back to legacy single-rail behavior when FeedSplit is
+/// disabled must also check this, or a Profile/Settings detour reactivates
+/// the legacy rail's one-time "open default directory" and stomps the
+/// navigation that was just requested.
+BOOL ApolloFeedSplitSuspended(void);
 
 /// Subs rail: stock popToRoot onto RedditList. Does not tile list|feed.
 void ApolloFeedSplitShowSubredditPicker(UINavigationController *nav);

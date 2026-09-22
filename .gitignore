@@ -17,6 +17,9 @@ Apollo
 .cache
 .DS_Store
 
+# Per-developer MCP server config (e.g. local Hopper.app path for RE work)
+.mcp.json
+
 # Liquid Glass
 liquid-glass/scripts/__pycache__/
 liquid-glass/scripts/cartool-extracted/
