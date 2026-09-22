@@ -212,28 +212,6 @@ static void ApolloDuoRailPerformItem(ApolloDuoRailItem item) {
     ApolloLog(@"[DuoRail] URL route failed for item %ld", (long)item);
 }
 
-// The app's current icon (default or active alternate), for the rail's
-// branding header row — same Info.plist-driven resolution used elsewhere
-// (see ApolloWhatsNewCurrentAppIcon), kept local to avoid cross-file coupling
-// for one small header glyph.
-static UIImage *ApolloDuoRailAppIcon(void) {
-    NSDictionary *icons = [NSBundle mainBundle].infoDictionary[@"CFBundleIcons"];
-    if (![icons isKindOfClass:[NSDictionary class]]) return nil;
-    NSArray<NSString *> *iconFiles = nil;
-    NSString *alternateName = [UIApplication sharedApplication].alternateIconName;
-    if (alternateName.length > 0) {
-        NSDictionary *alternates = icons[@"CFBundleAlternateIcons"];
-        NSDictionary *iconInfo = [alternates isKindOfClass:[NSDictionary class]] ? alternates[alternateName] : nil;
-        iconFiles = [iconInfo[@"CFBundleIconFiles"] isKindOfClass:[NSArray class]] ? iconInfo[@"CFBundleIconFiles"] : nil;
-    }
-    if (iconFiles.count == 0) {
-        NSDictionary *primary = icons[@"CFBundlePrimaryIcon"];
-        iconFiles = [primary[@"CFBundleIconFiles"] isKindOfClass:[NSArray class]] ? primary[@"CFBundleIconFiles"] : nil;
-    }
-    NSString *iconName = iconFiles.lastObject;
-    return iconName.length > 0 ? [UIImage imageNamed:iconName] : nil;
-}
-
 @interface ApolloDuoRailButton : UIControl
 @property (nonatomic, strong) UIImageView *iconView;
 @property (nonatomic, strong) UILabel *titleLabel;
@@ -254,7 +232,7 @@ static UIImage *ApolloDuoRailAppIcon(void) {
     self.iconView.contentMode = UIViewContentModeScaleAspectFit;
     if (@available(iOS 13.0, *)) {
         UIImageSymbolConfiguration *config =
-            [UIImageSymbolConfiguration configurationWithPointSize:18.0 weight:UIImageSymbolWeightSemibold];
+            [UIImageSymbolConfiguration configurationWithPointSize:20.0 weight:UIImageSymbolWeightMedium];
         self.iconView.image = [UIImage systemImageNamed:[NSString stringWithUTF8String:kApolloDuoRailSymbols[item]]
                                       withConfiguration:config];
     }
@@ -262,26 +240,23 @@ static UIImage *ApolloDuoRailAppIcon(void) {
 
     self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     self.titleLabel.text = title;
-    self.titleLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
-    self.titleLabel.textAlignment = NSTextAlignmentLeft;
-    self.titleLabel.numberOfLines = 1;
+    self.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightSemibold];
+    self.titleLabel.textAlignment = NSTextAlignmentCenter;
+    self.titleLabel.numberOfLines = 2;
     self.titleLabel.adjustsFontSizeToFitWidth = YES;
-    self.titleLabel.minimumScaleFactor = 0.75;
+    self.titleLabel.minimumScaleFactor = 0.72;
     [self addSubview:self.titleLabel];
     return self;
 }
 
-// Icon + label side-by-side sidebar row (not stacked) — matches a native
-// list-style sidebar rather than a compact tab-bar item.
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat width = CGRectGetWidth(self.bounds);
     CGFloat height = CGRectGetHeight(self.bounds);
-    CGFloat leading = 12.0;
     CGFloat icon = 20.0;
-    self.iconView.frame = CGRectMake(leading, (height - icon) * 0.5, icon, icon);
-    CGFloat labelX = leading + icon + 10.0;
-    self.titleLabel.frame = CGRectMake(labelX, 0.0, MAX(0.0, width - labelX - 10.0), height);
+    CGFloat iconY = 8.0;
+    self.iconView.frame = CGRectMake((width - icon) * 0.5, iconY, icon, icon);
+    self.titleLabel.frame = CGRectMake(3.0, iconY + icon + 4.0, width - 6.0, MAX(13.0, height - iconY - icon - 8.0));
 }
 
 - (void)apollo_applyForeground:(UIColor *)color selected:(BOOL)selected fill:(UIColor *)fill {
@@ -289,9 +264,9 @@ static UIImage *ApolloDuoRailAppIcon(void) {
     self.iconView.tintColor = color;
     self.titleLabel.textColor = color;
     self.titleLabel.font = selected
-        ? [UIFont systemFontOfSize:13.0 weight:UIFontWeightBold]
-        : [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
-    self.layer.cornerRadius = CGRectGetHeight(self.bounds) * 0.5;
+        ? [UIFont systemFontOfSize:11.0 weight:UIFontWeightBold]
+        : [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
+    self.layer.cornerRadius = 16.0;
     if (@available(iOS 13.0, *)) {
         self.layer.cornerCurve = kCACornerCurveContinuous;
     }
@@ -302,69 +277,7 @@ static UIImage *ApolloDuoRailAppIcon(void) {
 
 @end
 
-// Small branding header above the nav items: app icon + wordmark, the way a
-// native sidebar (Mail, Notes, Files) opens with a title row before its list.
-@interface ApolloDuoRailHeader : UIView
-@property (nonatomic, strong) UIImageView *iconView;
-@property (nonatomic, strong) UILabel *titleLabel;
-@property (nonatomic, strong) UIView *hairline;
-@end
-
-@implementation ApolloDuoRailHeader
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (!self) return self;
-    self.isAccessibilityElement = NO;
-
-    self.iconView = [[UIImageView alloc] initWithFrame:CGRectZero];
-    self.iconView.contentMode = UIViewContentModeScaleAspectFit;
-    self.iconView.layer.cornerRadius = 6.0;
-    self.iconView.clipsToBounds = YES;
-    if (@available(iOS 13.0, *)) {
-        self.iconView.layer.cornerCurve = kCACornerCurveContinuous;
-    }
-    self.iconView.image = ApolloDuoRailAppIcon();
-    [self addSubview:self.iconView];
-
-    self.titleLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    self.titleLabel.text = @"Apollo";
-    self.titleLabel.font = [UIFont systemFontOfSize:15.0 weight:UIFontWeightBold];
-    self.titleLabel.numberOfLines = 1;
-    self.titleLabel.adjustsFontSizeToFitWidth = YES;
-    self.titleLabel.minimumScaleFactor = 0.8;
-    [self addSubview:self.titleLabel];
-
-    self.hairline = [[UIView alloc] initWithFrame:CGRectZero];
-    self.hairline.userInteractionEnabled = NO;
-    [self addSubview:self.hairline];
-    return self;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat width = CGRectGetWidth(self.bounds);
-    CGFloat height = CGRectGetHeight(self.bounds);
-    CGFloat leading = 12.0;
-    CGFloat icon = 26.0;
-    CGFloat iconY = MAX(0.0, (height - 1.0 - icon) * 0.5);
-    self.iconView.frame = CGRectMake(leading, iconY, icon, icon);
-    CGFloat labelX = leading + icon + 8.0;
-    self.titleLabel.frame = CGRectMake(labelX, 0.0, MAX(0.0, width - labelX - 10.0), height - 1.0);
-    CGFloat hairline = 1.0 / MAX(self.window.screen.scale, 1.0);
-    self.hairline.frame = CGRectMake(leading, height - hairline, width - leading, hairline);
-}
-
-- (void)apollo_applyTheme {
-    self.titleLabel.textColor = ApolloThemeRuntimeColor(ApolloThemeTokenLabel) ?: UIColor.labelColor;
-    self.hairline.backgroundColor = ApolloThemeSeparatorColor()
-        ?: (UIColor.separatorColor ?: [UIColor colorWithWhite:0.0 alpha:0.08]);
-}
-
-@end
-
 @interface ApolloDuoRailView : UIView
-@property (nonatomic, strong) ApolloDuoRailHeader *header;
 @property (nonatomic, copy) NSArray<ApolloDuoRailButton *> *buttons;
 @property (nonatomic, strong) UIView *separatorView;
 @property (nonatomic, assign) ApolloDuoRailItem selectedItem;
@@ -380,9 +293,6 @@ static UIImage *ApolloDuoRailAppIcon(void) {
     if (!self) return self;
     self.autoresizingMask = UIViewAutoresizingFlexibleHeight;
     self.accessibilityTraits = UIAccessibilityTraitTabBar;
-
-    self.header = [[ApolloDuoRailHeader alloc] initWithFrame:CGRectZero];
-    [self addSubview:self.header];
 
     NSMutableArray<ApolloDuoRailButton *> *buttons = [NSMutableArray arrayWithCapacity:ApolloDuoRailItemCount];
     for (NSInteger i = 0; i < ApolloDuoRailItemCount; i++) {
@@ -419,7 +329,6 @@ static UIImage *ApolloDuoRailAppIcon(void) {
     self.backgroundColor = page;
     self.separatorView.backgroundColor = ApolloThemeSeparatorColor()
         ?: (UIColor.separatorColor ?: [UIColor colorWithWhite:0.0 alpha:0.08]);
-    [self.header apollo_applyTheme];
     UIColor *onAccent = ApolloColorIsLight(accent) ? UIColor.blackColor : UIColor.whiteColor;
     for (ApolloDuoRailButton *button in self.buttons) {
         BOOL selected = button.tag == (NSInteger)self.selectedItem;
@@ -429,20 +338,17 @@ static UIImage *ApolloDuoRailAppIcon(void) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    // Frame already starts at safe.top + 8. Header row (icon + wordmark)
-    // sits above the nav stack; Profile / Settings stay docked to the
-    // bottom, the four feed items stay a compact stack in between.
-    CGFloat headerHeight = 44.0;
-    CGFloat top = headerHeight + 6.0;
+    // Frame already starts at safe.top + 8. Keep Profile / Settings
+    // docked to the bottom; the four feed items stay a compact stack.
+    CGFloat top = 10.0;
     CGFloat bottom = 10.0;
     CGFloat width = CGRectGetWidth(self.bounds);
     CGFloat height = CGRectGetHeight(self.bounds);
-    self.header.frame = CGRectMake(0.0, 0.0, width, headerHeight);
     CGFloat usable = height - top - bottom;
     if (usable < 1.0) return;
 
     NSInteger count = (NSInteger)self.buttons.count;
-    CGFloat itemHeight = MIN(52.0, usable / (CGFloat)count);
+    CGFloat itemHeight = MIN(62.0, usable / (CGFloat)count);
     CGFloat y = top;
     for (NSInteger i = 0; i < count; i++) {
         UIView *button = self.buttons[(NSUInteger)i];
@@ -1284,15 +1190,7 @@ void ApolloDuoRailSync(void) {
     // Once the three-pane host owns the open Duo canvas, the legacy rail must
     // stop resizing Apollo's native feed. Continuing to fill the old phone
     // column causes the center pane to flicker and collapse to ~200pt.
-    //
-    // Also suppress while FeedSplit is merely *suspended* (Profile/Settings
-    // shown with the split host intentionally detached) — FeedSplitEnabled()
-    // alone reads NO during that detour since the host object is gone, which
-    // used to fall through into this legacy rail path below. Its one-time
-    // "open default directory" call would then fire and pop the just-tapped
-    // Profile/Settings navigation straight back to the subreddit picker,
-    // making Profile/Settings a dead end.
-    if (ApolloFeedSplitEnabled() || ApolloFeedSplitSuspended()) {
+    if (ApolloFeedSplitEnabled()) {
         ApolloDuoRailView *splitRail = objc_getAssociatedObject(tabs, &kApolloDuoRailViewKey);
         if (splitRail.superview) [splitRail removeFromSuperview];
         if (!sApolloDuoRailSplitSuppressed) {

@@ -92,7 +92,7 @@ ApolloReborn_FILES = \
     $(SRC_DIR)/ApolloCommon.m \
     $(SRC_DIR)/ApolloDeviceGeometry.m \
     $(SRC_DIR)/ApolloDeviceDisplay.m \
-    $(SRC_DIR)/ApolloDeviceDisplay.xm \
+    $(SRC_DIR)/ApolloDeviceDisplayHooks.xm \
     $(SRC_DIR)/ApolloDuoCompatibility.xm \
     $(SRC_DIR)/ApolloDeviceReservedRegions.m \
     $(SRC_DIR)/ApolloFeedSplit.xm \

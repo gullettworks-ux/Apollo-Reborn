@@ -11,9 +11,6 @@
 #import "ApolloDuoRail.h"
 #import "ApolloFeedSplitLayout.h"
 #import "ApolloThemeRuntime.h"
-#import "ApolloSubredditInfoCache.h"
-#import "ApolloSubredditCustomIconCache.h"
-#import "ApolloUserProfileCache.h"
 
 static char kApolloDuoSplitHostKey;
 static char kApolloDuoSplitOriginalSuperviewKey;
@@ -23,53 +20,20 @@ static BOOL sApolloDuoSplitAttaching = NO;
 static __weak UITabBarController *sApolloDuoSplitTabs = nil;
 static NSUInteger sApolloDuoSplitAttachRetries = 0;
 static char kApolloDuoSplitRelayoutKey;
-static char kApolloDuoSplitFeedRelayoutKey;
 // Profile and Settings are whole tabs, not panes. While one of them is
 // showing, the split host steps aside (stock tabs plus the rail take over)
 // until the user returns to the feed tab.
 static BOOL sApolloDuoSplitSuspended = NO;
 @class ApolloDuoSplitHost;
-static void ApolloFeedSplitMaskFeedTransition(ApolloDuoSplitHost *host);
 static UINavigationController *ApolloFeedSplitPostsNavigation(UITabBarController *tabs);
 static void ApolloFeedSplitOpenHomeFeed(UINavigationController *nav);
 static void ApolloFeedSplitFillDetailScrollViews(UIView *view);
-static BOOL ApolloFeedSplitCancelPhantomTrailingSafeArea(UIViewController *vc);
 static void ApolloFeedSplitWidenDetailSoon(void);
 static void ApolloFeedSplitDetach(UITabBarController *tabs);
 static BOOL ApolloFeedSplitHandleUtility(ApolloDuoSplitHost *host, NSString *title);
 static void ApolloFeedSplitLogDetailFrames(ApolloDuoSplitHost *host);
 static void ApolloFeedSplitDumpDetailTree(UIView *view, CGFloat targetWidth, NSInteger depth);
 static BOOL ApolloDuoSplitIsOpen(void);
-
-// Apollo reserves room at the top of its lists for its own navigation bar
-// and status bar. The host draws its own header, so that room shows up as a
-// blank band under it. Drop the reserved space, and if the list was resting
-// at the old top position, move it to the new top so the first row sits
-// directly under the header. Only acts on a list resting at that position,
-// so pull-to-refresh and normal scrolling are untouched.
-static void ApolloFeedSplitPinScrollTop(UIScrollView *scroll) {
-    if (!scroll) return;
-    CGFloat adjusted = 0.0;
-    if (@available(iOS 11.0, *)) adjusted = scroll.adjustedContentInset.top;
-    BOOL atRest = !scroll.isDragging && !scroll.isDecelerating;
-    BOOL restingAtTop = fabs(scroll.contentOffset.y + adjusted) < 1.5;
-    if (@available(iOS 11.0, *)) {
-        scroll.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
-    }
-    UIEdgeInsets inset = scroll.contentInset;
-    if (fabs(inset.top) > 0.5) {
-        inset.top = 0.0;
-        scroll.contentInset = inset;
-    }
-    UIEdgeInsets indicator = scroll.scrollIndicatorInsets;
-    if (fabs(indicator.top) > 0.5) {
-        indicator.top = 0.0;
-        scroll.scrollIndicatorInsets = indicator;
-    }
-    if (adjusted > 0.5 && atRest && restingAtTop) {
-        scroll.contentOffset = CGPointMake(scroll.contentOffset.x, 0.0);
-    }
-}
 
 // Apollo's ASTableView recreates/layouts its visible cells after the host's
 // pass. Apply the Duo width after Apollo's own layout has finished.
@@ -79,8 +43,6 @@ static void ApolloFeedSplitPinScrollTop(UIScrollView *scroll) {
     %orig;
     if (!ApolloDuoSplitIsOpen()) return;
     UITableView *table = (UITableView *)self;
-    UIView *splitHost = objc_getAssociatedObject(sApolloDuoSplitTabs, &kApolloDuoSplitHostKey);
-    if (splitHost && [table isDescendantOfView:splitHost]) ApolloFeedSplitPinScrollTop(table);
     CGFloat width = CGRectGetWidth(table.bounds);
     if (width < 1.0) return;
     table.cellLayoutMarginsFollowReadableWidth = NO;
@@ -120,20 +82,6 @@ static void ApolloFeedSplitWidenTableCells(UIView *view, CGFloat tableWidth) {
             table.scrollIndicatorInsets = UIEdgeInsetsZero;
         }
     }
-    // Any OTHER scroll/collection view nested inside the outer table (image
-    // gallery carousels, thumbnail strips, Texture ASCollectionView/
-    // ASPagerNode-backed views) sizes its own cells independently of the
-    // enclosing vertical table's width. Forcing those cells up to
-    // inheritedWidth stretched each gallery page to the detail column's full
-    // width while the collection view's own (narrower) frame stayed put, so
-    // two pages ended up visible side by side instead of one full-bleed
-    // page. Apollo is built on AsyncDisplayKit, whose collection/pager views
-    // don't reliably present as UICollectionViewFlowLayout, so key off any
-    // UIScrollView that isn't itself the table — not the layout class.
-    if ([view isKindOfClass:[UIScrollView class]] && ![view isKindOfClass:[UITableView class]]
-        && [NSStringFromClass(view.class) rangeOfString:@"TableView"].location == NSNotFound) {
-        inheritedWidth = 0.0;
-    }
     for (UIView *child in [view.subviews copy]) {
         NSString *className = NSStringFromClass(child.class);
         if (inheritedWidth > 0.0 && [className rangeOfString:@"Cell"].location != NSNotFound) {
@@ -161,46 +109,16 @@ static void ApolloFeedSplitWidenTableCells(UIView *view, CGFloat tableWidth) {
 }
 
 // Texture caches each row's layout at the width it was first measured. A row
-// built before the pane was widened stays narrow, leaving its content (text,
-// thumbnails) wrapped/packed at the old width even after the cell's UIKit
-// frame is stretched. relayoutItems/invalidateCalculatedLayout are declared
-// on ASTableNode (the node), not on the _ASTableView (its backing UIKit
-// view) that this walk actually finds — resolve the owning node the same
-// way ApolloDuoRail.m does before invalidating.
+// built before the pane was widened stays narrow, leaving a blank strip on the
+// right. Ask every table to re-measure at its current width.
 static void ApolloFeedSplitRelayoutTables(UIView *view) {
     if (!view) return;
     if ([NSStringFromClass(view.class) rangeOfString:@"ASTableView"].location != NSNotFound) {
-        id node = nil;
-        SEL nodeSelectors[] = { NSSelectorFromString(@"asyncdisplaykit_node"), NSSelectorFromString(@"node") };
-        for (size_t i = 0; i < sizeof(nodeSelectors) / sizeof(nodeSelectors[0]); i++) {
-            if ([view respondsToSelector:nodeSelectors[i]]) {
-                node = ((id (*)(id, SEL))objc_msgSend)(view, nodeSelectors[i]);
-                if (node) break;
-            }
-        }
-        if (node) {
-            SEL invalidate = NSSelectorFromString(@"invalidateCalculatedLayout");
-            if ([node respondsToSelector:invalidate]) {
-                ((void (*)(id, SEL))objc_msgSend)(node, invalidate);
-            }
-            SEL relayout = NSSelectorFromString(@"relayoutItems");
-            if ([node respondsToSelector:relayout]) {
-                ((void (*)(id, SEL))objc_msgSend)(node, relayout);
-            }
-            SEL needsLayout = NSSelectorFromString(@"setNeedsLayout");
-            if ([node respondsToSelector:needsLayout]) {
-                ((void (*)(id, SEL))objc_msgSend)(node, needsLayout);
-            }
+        SEL relayout = NSSelectorFromString(@"relayoutItems");
+        if ([view respondsToSelector:relayout]) {
+            ((void (*)(id, SEL))objc_msgSend)(view, relayout);
         }
     }
-    // NOTE: tried a beginUpdates/endUpdates branch here for plain UIKit
-    // self-sizing cells (Subreddits directory rows sometimes cache an
-    // oversized row height, leaving a dead gap below single-line text).
-    // Reverted — it overcorrected in the open/book layout (rows became too
-    // cramped) while doing nothing for portrait/Closed mode (which never
-    // reaches this function at all, via a completely separate rail-overlay
-    // code path in ApolloDuoRail.m). Needs a real fix in both places, not
-    // a blind forced recalculation in just one.
     for (UIView *child in [view.subviews copy]) ApolloFeedSplitRelayoutTables(child);
 }
 
@@ -233,7 +151,6 @@ static UITabBarController *ApolloFeedSplitFindVisibleTabs(void) {
 @interface ApolloDuoSplitHost : UIView
 @property (nonatomic, weak) UITabBarController *tabs;
 @property (nonatomic, strong) UIView *sidebar;
-@property (nonatomic, strong) UIScrollView *sidebarScroll;
 @property (nonatomic, strong) UIView *feedColumn;
 @property (nonatomic, strong) UIView *detailColumn;
 @property (nonatomic, strong) UIView *feedSeparator;
@@ -242,12 +159,14 @@ static UITabBarController *ApolloFeedSplitFindVisibleTabs(void) {
 @property (nonatomic, strong) UIView *feedHeader;
 @property (nonatomic, strong) UIView *detailHeader;
 @property (nonatomic, strong) UILabel *detailHeaderTitle;
+@property (nonatomic, strong) UILabel *feedHeaderTitle;
 @property (nonatomic, strong) UINavigationController *detailNavigation;
 @property (nonatomic, weak) UINavigationController *feedNavigation;
 - (instancetype)initWithTabs:(UITabBarController *)tabs feed:(UINavigationController *)feed;
 - (void)layoutColumns;
 - (void)showDetailViewController:(UIViewController *)controller;
 - (void)clearDetail;
+- (void)popFeedNavigation;
 @end
 
 static BOOL ApolloDuoSplitIsOpen(void) {
@@ -282,29 +201,15 @@ static UIColor *ApolloDuoSplitSeparatorColor(void) {
 // items (Profile/Settings) do not.
 @property (nonatomic, assign) BOOL selectable;
 @property (nonatomic, assign) BOOL pinnedBottom;
-// Stacking order among pinned-bottom items, 0 = flush at the very bottom,
-// higher values stack upward from there (Settings=0, Profile=1, so Profile
-// sits just above Settings rather than up in the scrollable list where it
-// could get fat-fingered while scrolling through subreddits).
-@property (nonatomic, assign) NSInteger pinnedOrder;
 @end
 @implementation ApolloDuoSplitSidebarButton
-// Icon over label, stacked vertically and centered — re-examined the
-// reference render closely: its rail items are a narrow icon-above-text
-// column (house icon, "Home" text below, centered in a portrait-ish rounded
-// box), not icon+label side by side. An earlier pass misread that as
-// horizontal; this corrects it back.
+// Icon-over-label rail item, as in the reference layout.
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat width = CGRectGetWidth(self.bounds);
-    // A fixed icon box, not the image's own .size: that worked by accident
-    // for SF Symbols (whose intrinsic size already matches their configured
-    // point size) but a real downloaded subreddit icon is a full-resolution
-    // photo — sized to its own pixel dimensions, it swallowed the whole
-    // button. contentMode scales any source down (or up) to fit this box.
-    const CGFloat icon = 22.0;
-    self.imageView.contentMode = UIViewContentModeScaleAspectFit;
-    self.imageView.frame = CGRectMake(floor((width - icon) * 0.5), 10.0, icon, icon);
+    CGSize icon = self.imageView.image.size;
+    self.imageView.frame = CGRectMake(floor((width - icon.width) * 0.5), 10.0,
+                                      icon.width, icon.height);
     self.titleLabel.frame = CGRectMake(4.0, 38.0, MAX(0.0, width - 8.0), 28.0);
 }
 @end
@@ -354,21 +259,12 @@ static void ApolloDuoSplitStyleSidebarButton(UIButton *button, BOOL selected);
     }
     if ([sender.route isEqualToString:@"apollo://home"]) {
         UITabBarController *tabs = self.host.tabs;
-        // performWithoutAnimation only suppresses UIView-level animation
-        // blocks — it does nothing about Apollo's own internal IGListKit
-        // diffing update, which appears to run its own animated
-        // insert/delete transition on the feed table regardless, briefly
-        // compositing the outgoing and incoming rows on top of each other.
-        // Mask the transition instead of fighting it: hide the feed
-        // instantly, let Apollo's animation run underneath invisibly, then
-        // reveal once it's had time to finish.
-        ApolloFeedSplitMaskFeedTransition(self.host);
-        [UIView performWithoutAnimation:^{
-            if ([tabs respondsToSelector:@selector(goToHomeTab)]) {
-                ((void (*)(id, SEL))objc_msgSend)(tabs, @selector(goToHomeTab));
-            }
+        if ([tabs respondsToSelector:@selector(goToHomeTab)]) {
+            ((void (*)(id, SEL))objc_msgSend)(tabs, @selector(goToHomeTab));
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
             ApolloFeedSplitOpenHomeFeed(ApolloFeedSplitPostsNavigation(tabs));
-        }];
+        });
         return;
     }
     if ([sender.route isEqualToString:@"apollo://saved"] ||
@@ -382,14 +278,12 @@ static void ApolloDuoSplitStyleSidebarButton(UIButton *button, BOOL selected);
     NSURL *url = [NSURL URLWithString:sender.route];
     if (url) {
         __block BOOL routed = NO;
-        // See the matching comment on the Home route above: this masks
-        // Apollo's own animated IGListKit diffing transition, which runs
-        // independent of our performWithoutAnimation wrapper.
-        ApolloFeedSplitMaskFeedTransition(self.host);
-        [UIView performWithoutAnimation:^{
-            routed = ApolloRouteURLThroughApp(url);
-            if (routed) [self.host layoutColumns];
-        }];
+        [UIView performWithoutAnimation:^{ routed = ApolloRouteURLThroughApp(url); }];
+        if (routed) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self.host layoutColumns];
+            });
+        }
     }
 }
 @end
@@ -453,53 +347,9 @@ static BOOL ApolloFeedSplitHandleUtility(ApolloDuoSplitHost *host, NSString *tit
 static void ApolloDuoSplitStyleSidebarButton(UIButton *button, BOOL selected) {
     UIColor *accent = ApolloThemeAccentColor() ?: UIColor.systemBlueColor;
     UIColor *muted = ApolloThemeRuntimeColor(ApolloThemeTokenSecondaryLabel) ?: UIColor.secondaryLabelColor;
-    UIColor *onAccent = ApolloColorIsLight(accent) ? UIColor.blackColor : UIColor.whiteColor;
-    [button setTitleColor:selected ? onAccent : muted forState:UIControlStateNormal];
-    button.tintColor = selected ? onAccent : muted;
-    button.backgroundColor = selected ? accent : UIColor.clearColor;
-}
-
-// Real subreddit icon for a sidebar favorite row — same cache-then-fetch
-// pattern already proven in ApolloSubredditHeaders.xm's header icon loading:
-// user-set custom icon first, then the fetched community icon, downloaded
-// through the shared image cache. Set with UIImageRenderingModeAlwaysOriginal
-// (not the SF Symbols' template mode) so the icon's real colors show instead
-// of being tinted like the plain nav glyphs — a "#" placeholder is generic
-// and reads unpolished next to real subreddit branding.
-static void ApolloDuoSplitApplySubredditIcon(ApolloDuoSplitSidebarButton *button, NSString *subredditName) {
-    if (!button || subredditName.length == 0) return;
-    UIImage *customIcon = [[ApolloSubredditCustomIconCache sharedCache] cachedIconForSubreddit:subredditName];
-    if (customIcon) {
-        [button setImage:[customIcon imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal]
-                 forState:UIControlStateNormal];
-        return;
-    }
-    void (^apply)(UIImage *) = ^(UIImage *image) {
-        if (!image) return;
-        [button setImage:[image imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal]
-                 forState:UIControlStateNormal];
-    };
-    ApolloSubredditInfo *cached = [[ApolloSubredditInfoCache sharedCache] cachedInfoForSubreddit:subredditName];
-    ApolloUserProfileCache *imageCache = [ApolloUserProfileCache sharedCache];
-    if (cached.iconURL) {
-        UIImage *icon = [imageCache cachedImageForURL:cached.iconURL];
-        if (icon) { apply(icon); return; }
-        __weak ApolloDuoSplitSidebarButton *weakButton = button;
-        [imageCache requestImageForURL:cached.iconURL completion:^(UIImage *image) {
-            apply(weakButton ? image : nil);
-        }];
-        return;
-    }
-    __weak ApolloDuoSplitSidebarButton *weakButton = button;
-    [[ApolloSubredditInfoCache sharedCache] requestInfoForSubreddit:subredditName completion:^(ApolloSubredditInfo *info) {
-        ApolloDuoSplitSidebarButton *strongButton = weakButton;
-        if (!strongButton || !info.iconURL) return;
-        UIImage *icon = [imageCache cachedImageForURL:info.iconURL];
-        if (icon) { apply(icon); return; }
-        [imageCache requestImageForURL:info.iconURL completion:^(UIImage *image) {
-            apply(weakButton ? image : nil);
-        }];
-    }];
+    [button setTitleColor:selected ? accent : muted forState:UIControlStateNormal];
+    button.tintColor = selected ? accent : muted;
+    button.backgroundColor = selected ? [accent colorWithAlphaComponent:0.14] : UIColor.clearColor;
 }
 
 static ApolloDuoSplitSidebarButton *ApolloDuoSplitMakeSidebarButton(ApolloDuoSplitSidebarController *target,
@@ -514,48 +364,18 @@ static ApolloDuoSplitSidebarButton *ApolloDuoSplitMakeSidebarButton(ApolloDuoSpl
     button.feedTitle = feedTitle;
     button.selectable = selectable;
     button.accessibilityLabel = title;
-    button.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightSemibold];
+    button.titleLabel.font = [UIFont systemFontOfSize:11.0 weight:UIFontWeightMedium];
     button.titleLabel.numberOfLines = 2;
     button.titleLabel.textAlignment = NSTextAlignmentCenter;
     button.titleLabel.lineBreakMode = NSLineBreakByWordWrapping;
-    button.layer.cornerRadius = 16.0;
-    if (@available(iOS 13.0, *)) {
-        button.layer.cornerCurve = kCACornerCurveContinuous;
-    }
+    button.layer.cornerRadius = 12.0;
     UIImageSymbolConfiguration *config =
-        [UIImageSymbolConfiguration configurationWithPointSize:22.0 weight:UIImageSymbolWeightMedium];
+        [UIImageSymbolConfiguration configurationWithPointSize:22.0 weight:UIImageSymbolWeightRegular];
     [button setImage:[UIImage systemImageNamed:symbol withConfiguration:config] forState:UIControlStateNormal];
     [button setTitle:title forState:UIControlStateNormal];
     ApolloDuoSplitStyleSidebarButton(button, selected);
     [button addTarget:target action:@selector(tap:) forControlEvents:UIControlEventTouchUpInside];
-    // "number" marks a dynamically-added favorite-subreddit row (see
-    // ApolloDuoSplitBuildSidebar) — replace its generic "#" placeholder with
-    // the subreddit's real icon once available.
-    if ([symbol isEqualToString:@"number"] && feedTitle.length > 0) {
-        ApolloDuoSplitApplySubredditIcon(button, feedTitle);
-    }
     return button;
-}
-
-// The app's current icon (default or active alternate), for the sidebar's
-// branding header — same Info.plist-driven resolution UIApplication itself
-// uses for alternateIconName.
-static UIImage *ApolloDuoSplitAppIcon(void) {
-    NSDictionary *icons = [NSBundle mainBundle].infoDictionary[@"CFBundleIcons"];
-    if (![icons isKindOfClass:[NSDictionary class]]) return nil;
-    NSArray<NSString *> *iconFiles = nil;
-    NSString *alternateName = [UIApplication sharedApplication].alternateIconName;
-    if (alternateName.length > 0) {
-        NSDictionary *alternates = icons[@"CFBundleAlternateIcons"];
-        NSDictionary *iconInfo = [alternates isKindOfClass:[NSDictionary class]] ? alternates[alternateName] : nil;
-        iconFiles = [iconInfo[@"CFBundleIconFiles"] isKindOfClass:[NSArray class]] ? iconInfo[@"CFBundleIconFiles"] : nil;
-    }
-    if (iconFiles.count == 0) {
-        NSDictionary *primary = icons[@"CFBundlePrimaryIcon"];
-        iconFiles = [primary[@"CFBundleIconFiles"] isKindOfClass:[NSArray class]] ? primary[@"CFBundleIconFiles"] : nil;
-    }
-    NSString *iconName = iconFiles.lastObject;
-    return iconName.length > 0 ? [UIImage imageNamed:iconName] : nil;
 }
 
 static UIView *ApolloDuoSplitHeader(NSString *title, UIColor *background) {
@@ -592,63 +412,29 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
     target.host = host;
     objc_setAssociatedObject(sidebar, "apollo.sidebar.target", target, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
-    UIScrollView *scroll = [[UIScrollView alloc] initWithFrame:CGRectZero];
-    scroll.showsVerticalScrollIndicator = NO;
-    scroll.alwaysBounceVertical = YES;
-    [sidebar addSubview:scroll];
-    host.sidebarScroll = scroll;
-
-    // Four static nav buttons — Home, Popular, All, and Subreddits (which
-    // opens the full subreddit directory in the feed pane on tap, same as
-    // tapping the header's "+"). Not a live list of favorited subreddits
-    // inline in the sidebar: that read as clutter rather than navigation —
-    // a lean, predictable button list is what a permanent sidebar should be.
-    // Frames are set in -layoutColumns (scrollable stack; Profile/Settings
-    // pinned to the sidebar's own bottom, outside the scroll view).
-    NSMutableArray<NSDictionary *> *items = [NSMutableArray arrayWithArray:@[
-        @{ @"title": @"Subreddits", @"symbol": @"list.bullet",             @"route": @"apollo://subreddits",
-           @"feed": @"My Subreddits", @"selectable": @YES },
-        @{ @"title": @"Home",       @"symbol": @"house.fill",              @"route": @"apollo://home",
+    // Narrow icon rail from the reference layout. Frames are set in
+    // -layoutColumns (top stack, Settings pinned to the bottom).
+    NSArray<NSDictionary *> *items = @[
+        @{ @"title": @"Home",          @"symbol": @"house.fill", @"route": @"apollo://home",
            @"feed": @"Home", @"selectable": @YES, @"selected": @YES },
-        @{ @"title": @"Popular",    @"symbol": @"flame.fill",              @"route": @"apollo://reddit.com/r/popular",
+        @{ @"title": @"Popular",       @"symbol": @"safari",     @"route": @"apollo://reddit.com/r/popular",
            @"feed": @"Popular", @"selectable": @YES },
-        @{ @"title": @"All",        @"symbol": @"globe.americas.fill",     @"route": @"apollo://reddit.com/r/all",
+        @{ @"title": @"All",           @"symbol": @"globe",      @"route": @"apollo://reddit.com/r/all",
            @"feed": @"All", @"selectable": @YES },
-    ]];
-    // NOT added: Saved / History rows. apollo://saved and apollo://history
-    // report success from ApolloRouteURLThroughApp but don't actually
-    // navigate the feed pane (Apollo has no goToSavedTab/goToHistoryTab
-    // selector — Saved/History are rows inside the Profile screen, backed by
-    // SavedPostsCommentsViewController, which needs private pagination/
-    // category state Profile sets up internally to construct correctly). A
-    // button whose label doesn't match what tapping it does is worse than no
-    // button — reachable via Profile for now until that VC is wired up
-    // properly.
+        @{ @"title": @"My Subreddits", @"symbol": @"bookmark",   @"route": @"apollo://subreddits",
+           @"feed": @"My Subreddits", @"selectable": @YES },
+        @{ @"title": @"Profile",       @"symbol": @"person",     @"route": @"apollo://profile" },
+        @{ @"title": @"Settings",      @"symbol": @"gearshape",  @"route": @"apollo://settings",
+           @"pinned": @YES },
+    ];
     for (NSDictionary *item in items) {
         ApolloDuoSplitSidebarButton *button =
             ApolloDuoSplitMakeSidebarButton(target, item[@"title"], item[@"symbol"], item[@"route"],
                                             item[@"feed"], [item[@"selectable"] boolValue],
                                             [item[@"selected"] boolValue]);
-        [scroll addSubview:button];
+        button.pinnedBottom = [item[@"pinned"] boolValue];
+        [sidebar addSubview:button];
     }
-
-    // Profile and Settings both pin to the sidebar's own bottom, below the
-    // scrollable subreddit list — not mixed into the scroll content, where
-    // Profile previously sat right above the favorites and was an easy
-    // accidental tap while scrolling through subreddits.
-    ApolloDuoSplitSidebarButton *profile =
-        ApolloDuoSplitMakeSidebarButton(target, @"Profile", @"person.crop.circle.fill",
-                                        @"apollo://profile", nil, NO, NO);
-    profile.pinnedBottom = YES;
-    profile.pinnedOrder = 1;
-    [sidebar addSubview:profile];
-
-    ApolloDuoSplitSidebarButton *settings =
-        ApolloDuoSplitMakeSidebarButton(target, @"Settings", @"gearshape.fill",
-                                        @"apollo://settings", nil, NO, NO);
-    settings.pinnedBottom = YES;
-    settings.pinnedOrder = 0;
-    [sidebar addSubview:settings];
     return sidebar;
 }
 
@@ -676,28 +462,30 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
     [self addSubview:self.detailSeparator];
 
     // Dedicated Duo headers match the reference sketch and keep Apollo's
-    // phone toolbar from consuming the center column. Sidebar header is
-    // branding (app icon + "Apollo"), matching the reference layout, not an
-    // add-subreddit affordance — that lives in the real directory the
-    // Subreddits nav item opens, which has its own native "+".
-    self.sidebarHeader = ApolloDuoSplitHeader(@"Apollo", self.sidebar.backgroundColor);
+    // phone toolbar from consuming the center column.
+    self.sidebarHeader = ApolloDuoSplitHeader(@"MY SUBREDDITS", self.sidebar.backgroundColor);
     self.feedHeader = ApolloDuoSplitHeader(@"Home", self.feedColumn.backgroundColor);
     self.detailHeader = ApolloDuoSplitHeader(@"Comments", self.detailColumn.backgroundColor);
     self.detailHeaderTitle = [self.detailHeader viewWithTag:9001];
+    self.feedHeaderTitle = [self.feedHeader viewWithTag:9001];
     [self.sidebar addSubview:self.sidebarHeader];
     [self.feedColumn addSubview:self.feedHeader];
     [self.detailColumn addSubview:self.detailHeader];
 
-    UIImageView *brandIcon = [[UIImageView alloc] initWithFrame:CGRectZero];
-    brandIcon.tag = 9003;
-    brandIcon.contentMode = UIViewContentModeScaleAspectFit;
-    brandIcon.layer.cornerRadius = 6.0;
-    brandIcon.clipsToBounds = YES;
-    if (@available(iOS 13.0, *)) {
-        brandIcon.layer.cornerCurve = kCACornerCurveContinuous;
-    }
-    brandIcon.image = ApolloDuoSplitAppIcon();
-    [self.sidebarHeader addSubview:brandIcon];
+    UIButton *plus = ApolloDuoSplitHeaderButton(@"plus", self, @selector(addSubreddit));
+    plus.frame = CGRectMake(0, 0, 40, 40);
+    plus.accessibilityLabel = @"Add subreddit";
+    [self.sidebarHeader addSubview:plus];
+    // Apollo's real nav bar (with its own back chevron) is hidden below to make
+    // room for this header, so once feedNavigation is pushed past its root
+    // (e.g. into a subreddit) there is otherwise no way back -- see
+    // layoutColumns, which shows/hides and positions this based on stack depth.
+    UIButton *feedBack = ApolloDuoSplitHeaderButton(@"chevron.left", self, @selector(popFeedNavigation));
+    feedBack.tag = 9100;
+    feedBack.frame = CGRectMake(0, 0, 40, 40);
+    feedBack.hidden = YES;
+    feedBack.accessibilityLabel = @"Back";
+    [self.feedHeader addSubview:feedBack];
     UIButton *feedSearch = ApolloDuoSplitHeaderButton(@"magnifyingglass", self, @selector(searchFeed));
     feedSearch.tag = 9101;
     feedSearch.frame = CGRectMake(0, 0, 40, 40);
@@ -754,53 +542,22 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
     self.feedSeparator.frame = CGRectMake((CGFloat)cols.feedX - 1.0, 0.0, 1.0, height);
     self.detailSeparator.frame = CGRectMake((CGFloat)cols.hingeX - 0.5, 0.0, 1.0, height);
     self.detailColumn.frame = CGRectMake((CGFloat)cols.detailX, 0.0, detailWidth, height);
-    // Branding header (app icon + "Apollo") back above the nav list, per the
-    // reference layout — distinct from the earlier "MY SUBREDDITS" + add
-    // button header, which was redundant with the Subreddits nav item below
-    // it. This one is pure identity, not a duplicate control.
-    self.sidebarHeader.hidden = NO;
+    self.sidebarHeader.hidden = YES;
     {
-        CGFloat topInset = MAX(self.safeAreaInsets.top, 26.0);
-        CGFloat headerHeight = 52.0 + topInset;
-        CGFloat bottomInset = MAX(self.safeAreaInsets.bottom, 12.0);
-        // 60pt was actually too short for its own content: the button's
-        // icon+label layout (icon at y=10..32, label at y=38..66) needs
-        // ~66pt, so labels were overflowing the row's own bounds, and a 2pt
-        // gap left almost no breathing room between rows — both read as
-        // "squished." 72pt/6pt (matching ApolloDuoRail.m's proven
-        // icon-over-label proportions) actually fits the content.
         const CGFloat itemHeight = 72.0;
         const CGFloat itemGap = 6.0;
         CGFloat itemWidth = MAX(0.0, sidebarWidth - 16.0);
-
-        NSMutableArray<ApolloDuoSplitSidebarButton *> *pinned = [NSMutableArray array];
+        CGFloat stackY = MAX(self.safeAreaInsets.top, 26.0) + 12.0;
+        CGFloat bottomInset = MAX(self.safeAreaInsets.bottom, 12.0);
         for (UIView *view in self.sidebar.subviews) {
-            if ([view isKindOfClass:[ApolloDuoSplitSidebarButton class]]
-                && ((ApolloDuoSplitSidebarButton *)view).pinnedBottom) {
-                [pinned addObject:(ApolloDuoSplitSidebarButton *)view];
-            }
-        }
-        [pinned sortUsingComparator:^NSComparisonResult(ApolloDuoSplitSidebarButton *a, ApolloDuoSplitSidebarButton *b) {
-            return a.pinnedOrder < b.pinnedOrder ? NSOrderedAscending
-                 : a.pinnedOrder > b.pinnedOrder ? NSOrderedDescending : NSOrderedSame;
-        }];
-        CGFloat pinnedHeight = pinned.count > 0 ? (CGFloat)pinned.count * itemHeight + 8.0 : 0.0;
-        CGFloat scrollY = headerHeight;
-        CGFloat scrollHeight = MAX(0.0, height - scrollY - bottomInset - pinnedHeight);
-        self.sidebarScroll.frame = CGRectMake(0.0, scrollY, sidebarWidth, scrollHeight);
-
-        CGFloat y = 8.0;
-        for (UIView *view in self.sidebarScroll.subviews) {
             if (![view isKindOfClass:[ApolloDuoSplitSidebarButton class]]) continue;
-            view.frame = CGRectMake(8.0, y, itemWidth, itemHeight);
-            y += itemHeight + itemGap;
-        }
-        self.sidebarScroll.contentSize = CGSizeMake(sidebarWidth, y + 8.0);
-
-        CGFloat pinnedY = height - bottomInset - itemHeight;
-        for (ApolloDuoSplitSidebarButton *item in pinned) {
-            item.frame = CGRectMake(8.0, pinnedY, itemWidth, itemHeight);
-            pinnedY -= itemHeight;
+            ApolloDuoSplitSidebarButton *item = (ApolloDuoSplitSidebarButton *)view;
+            if (item.pinnedBottom) {
+                item.frame = CGRectMake(8.0, height - bottomInset - itemHeight, itemWidth, itemHeight);
+            } else {
+                item.frame = CGRectMake(8.0, stackY, itemWidth, itemHeight);
+                stackY += itemHeight + itemGap;
+            }
         }
     }
     // The Duo status bar (clock, Wi-Fi) overlays the top of the right screen;
@@ -814,23 +571,32 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
     for (UIView *header in @[self.sidebarHeader, self.feedHeader, self.detailHeader]) {
         UILabel *label = [header viewWithTag:9001];
         UIView *rule = [header viewWithTag:9002];
-        BOOL isSidebar = header == self.sidebarHeader;
-        // The sidebar header leads with the app icon (brandIcon, tag 9003),
-        // so its label starts further in than the feed/detail headers' bare
-        // text titles.
-        CGFloat leading = isSidebar ? 38.0 : 18.0;
         label.adjustsFontSizeToFitWidth = YES;
-        label.minimumScaleFactor = isSidebar ? 0.6 : 0.68;
-        label.frame = CGRectMake(leading, topInset + 8.0, MAX(0.0, CGRectGetWidth(header.bounds) - leading - 8.0), 34.0);
+        label.minimumScaleFactor = 0.68;
+        label.frame = CGRectMake(18.0, topInset + 8.0, MAX(108.0, CGRectGetWidth(header.bounds) - 58.0), 34.0);
         rule.frame = CGRectMake(0.0, headerHeight - 1.0, CGRectGetWidth(header.bounds), 1.0);
     }
-    UIImageView *brandIcon = [self.sidebarHeader viewWithTag:9003];
-    brandIcon.frame = CGRectMake(8.0, topInset + 11.0, 24.0, 24.0);
+    UIButton *plus = self.sidebarHeader.subviews.lastObject;
+    plus.frame = CGRectMake(sidebarWidth - 48.0, topInset + 6.0, 40.0, 40.0);
     NSArray *feedButtons = @[[self.feedHeader viewWithTag:9101], [self.feedHeader viewWithTag:9102]];
     feedButtons = (feedButtons[0] && feedButtons[1]) ? feedButtons : @[];
     if (feedButtons.count == 2) {
         [feedButtons[0] setFrame:CGRectMake(feedWidth - 92.0, topInset + 6.0, 40.0, 40.0)];
         [feedButtons[1] setFrame:CGRectMake(feedWidth - 48.0, topInset + 6.0, 40.0, 40.0)];
+    }
+    // Only the root of feedNavigation (Home/My Subreddits list) hides behind
+    // this custom header with no way back; anything pushed on top of it needs
+    // a real back control since Apollo's own nav bar stays hidden throughout.
+    BOOL feedHasBack = self.feedNavigation.viewControllers.count > 1;
+    UIButton *feedBack = [self.feedHeader viewWithTag:9100];
+    feedBack.hidden = !feedHasBack;
+    if (feedHasBack) {
+        feedBack.frame = CGRectMake(10.0, topInset + 6.0, 40.0, 40.0);
+    }
+    if (self.feedHeaderTitle) {
+        self.feedHeaderTitle.frame = feedHasBack
+            ? CGRectMake(58.0, topInset + 8.0, MAX(108.0, feedWidth - 150.0), 34.0)
+            : CGRectMake(18.0, topInset + 8.0, MAX(108.0, feedWidth - 58.0), 34.0);
     }
     NSArray *detailButtons = @[[self.detailHeader viewWithTag:9201], [self.detailHeader viewWithTag:9202]];
     detailButtons = (detailButtons[0] && detailButtons[1]) ? detailButtons : @[];
@@ -866,15 +632,6 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
         // after the navigation controller lays out. Widen the complete
         // hierarchy, including the root when it is itself a scroll view.
         detailVisible.view.bounds = detailBounds;
-        // See matching comment on the feed-column call: reapplying isn't
-        // redundant (UIKit resets additionalSafeAreaInsets on its own
-        // timing), and when it actually had to reapply, already-measured
-        // cells need a forced relayout the dedup key below wouldn't trigger
-        // on its own.
-        if (ApolloFeedSplitCancelPhantomTrailingSafeArea(detailVisible)) {
-            objc_setAssociatedObject(self, &kApolloDuoSplitRelayoutKey, nil,
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        }
         ApolloFeedSplitFillDetailScrollViews(detailVisible.view);
         ApolloFeedSplitWidenTableCells(detailVisible.view, 0.0);
         NSString *relayoutKey = [NSString stringWithFormat:@"%p-%.0f", detailVisible,
@@ -911,67 +668,13 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
             if (visibleFrameChanged) visible.view.frame = visibleFrame;
             visible.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             if (feedFrameChanged || visibleFrameChanged) [visible.view setNeedsLayout];
-            // UIKit resets additionalSafeAreaInsets on its own view controller
-            // lifecycle timing (e.g. leaving and returning to this tab), so a
-            // safe area that was already cancelled can come back — reapplying
-            // it here is necessary, not redundant. When it actually had to
-            // reapply, cells that were already created/measured under the
-            // phantom-narrow width need a fresh relayout too, so clear the
-            // dedup key to force one below even though (visible, width)
-            // hasn't changed — that's what the dedup key was tracking, and
-            // this specific staleness isn't captured by either of those.
-            if (ApolloFeedSplitCancelPhantomTrailingSafeArea(visible)) {
-                objc_setAssociatedObject(self, &kApolloDuoSplitFeedRelayoutKey, nil,
-                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
-            // The detail/comments column got this widen treatment from the
-            // start; the feed column never did, so its native post rows
-            // stayed sized for whatever narrower width they were last
-            // measured at — content (thumbnail, text) packed to the left
-            // with a dead gap of blank space before the column's actual
-            // right edge, instead of filling it.
-            ApolloFeedSplitFillDetailScrollViews(visible.view);
-            ApolloFeedSplitWidenTableCells(visible.view, 0.0);
-            NSString *feedRelayoutKey = [NSString stringWithFormat:@"%p-%.0f", visible,
-                                         CGRectGetWidth(visibleFrame)];
-            if (![feedRelayoutKey isEqualToString:objc_getAssociatedObject(self, &kApolloDuoSplitFeedRelayoutKey)]) {
-                objc_setAssociatedObject(self, &kApolloDuoSplitFeedRelayoutKey, feedRelayoutKey,
-                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                ApolloFeedSplitRelayoutTables(visible.view);
-                __weak UIViewController *weakVisible = visible;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    UIViewController *strongVisible = weakVisible;
-                    if (strongVisible.isViewLoaded) ApolloFeedSplitRelayoutTables(strongVisible.view);
-                });
-            }
         }
     }
     ApolloFeedSplitLogDetailFrames(self);
 }
 
-// "+" in the sidebar header opens Apollo's real, full subreddit directory
-// (search, A-Z index, favorites/moderator/multireddit sections, its own
-// real add-subreddit affordance) into the feed pane — the sidebar's
-// favorites shortlist is a curated subset, not a replacement for it.
-- (void)addSubreddit {
-    UINavigationController *nav = self.feedNavigation;
-    if (nav.viewControllers.count > 1) [nav popToRootViewControllerAnimated:NO];
-    dispatch_async(dispatch_get_main_queue(), ^{ [self layoutColumns]; });
-}
-// Same hand-back-to-stock-tabs pattern as the Profile route: Apollo's real
-// search UI isn't something this split host hosts, so detach and let the
-// native tab bar controller show it. This was a no-op stub before — search
-// silently did nothing when tapped.
-- (void)searchFeed {
-    UITabBarController *tabs = self.tabs;
-    sApolloDuoSplitSuspended = YES;
-    ApolloFeedSplitDetach(tabs);
-    if ([tabs respondsToSelector:@selector(goToSearchTab)]) {
-        ((void (*)(id, SEL))objc_msgSend)(tabs, @selector(goToSearchTab));
-    }
-    dispatch_async(dispatch_get_main_queue(), ^{ ApolloDuoRailSync(); });
-}
+- (void)addSubreddit { }
+- (void)searchFeed { }
 - (void)noopHeaderAction { }
 
 - (void)showDetailViewController:(UIViewController *)controller {
@@ -984,21 +687,17 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
     ApolloLog(@"[FeedSplit] selected post hosted in right pane: %@", NSStringFromClass(controller.class));
 }
 
-// The detail header's "<" always reset the whole pane to blank, discarding
-// any deeper navigation (e.g. tapping a commenter's profile, which pushes a
-// second view controller onto detailNavigation) instead of just going back
-// one step — from the pushed screen, "back" looked like it wasn't working
-// because it skipped straight past the comments screen you were expecting
-// to land on. Pop one level when there's somewhere to pop to; only clear to
-// a blank placeholder once already at the root.
 - (void)clearDetail {
-    if (self.detailNavigation.viewControllers.count > 1) {
-        [self.detailNavigation popViewControllerAnimated:NO];
-        return;
-    }
     UIViewController *placeholder = [UIViewController new];
     placeholder.view.backgroundColor = ApolloDuoSplitPageColor();
     [self.detailNavigation setViewControllers:@[placeholder] animated:NO];
+}
+
+- (void)popFeedNavigation {
+    if (self.feedNavigation.viewControllers.count > 1) {
+        [self.feedNavigation popViewControllerAnimated:NO];
+    }
+    [self layoutColumns];
 }
 @end
 
@@ -1017,43 +716,6 @@ static UINavigationController *ApolloFeedSplitPostsNavigation(UITabBarController
     UIViewController *selected = tabs.selectedViewController;
     return [selected isKindOfClass:[UINavigationController class]]
         ? (UINavigationController *)selected : selected.navigationController;
-}
-
-// Apollo's own IGListKit-driven feed swap runs its own animated
-// insert/delete diffing transition independent of our
-// performWithoutAnimation wrapper, briefly compositing the outgoing and
-// incoming rows on top of each other (visible as garbled/overlapping text
-// for a frame or two when switching Home/Popular/All quickly). Rather than
-// try to intercept and force that diffing update to be non-animated, hide
-// the feed instantly and reveal it once Apollo's transition has had time to
-// finish — trades a brief blank flash for the double-render glitch, which
-// reads as an intentional page-turn rather than a bug. A generation token
-// guards against a rapid second tap firing an earlier fade-in after a
-// newer hide, which would flash the still-transitioning content early.
-static char kApolloDuoSplitFeedMaskGenerationKey;
-static void ApolloFeedSplitMaskFeedTransition(ApolloDuoSplitHost *host) {
-    UIView *feedView = host.feedNavigation.view;
-    if (!feedView) return;
-    feedView.alpha = 0.0;
-    NSUInteger generation = [objc_getAssociatedObject(host, &kApolloDuoSplitFeedMaskGenerationKey) unsignedIntegerValue] + 1;
-    objc_setAssociatedObject(host, &kApolloDuoSplitFeedMaskGenerationKey, @(generation),
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    __weak ApolloDuoSplitHost *weakHost = host;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.55 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        ApolloDuoSplitHost *strongHost = weakHost;
-        if (!strongHost) return;
-        NSUInteger current = [objc_getAssociatedObject(strongHost, &kApolloDuoSplitFeedMaskGenerationKey) unsignedIntegerValue];
-        if (current != generation) return;
-        // Re-run the full width-fix pass (safe area cancellation, cell
-        // widening, relayout) right before revealing, on whatever content
-        // actually landed — rather than trust that a fix scheduled earlier
-        // already caught up with it by now.
-        [strongHost layoutColumns];
-        [UIView animateWithDuration:0.15 animations:^{
-            strongHost.feedNavigation.view.alpha = 1.0;
-        }];
-    });
 }
 
 static void ApolloFeedSplitOpenHomeFeed(UINavigationController *nav) {
@@ -1094,54 +756,11 @@ static void ApolloFeedSplitDetach(UITabBarController *tabs) {
             feed.view.frame = savedFrame ? savedFrame.CGRectValue : original.bounds;
         }
     }
-    // feed is Apollo's own real navigation controller, shared with
-    // portrait/Closed mode — layoutColumns hides its navigation bar to make
-    // room for our book-layout header, but nothing ever set it back. Left
-    // hidden, Closed/portrait mode loses its back button and title bar
-    // entirely, since it's the same controller instance.
-    [feed setNavigationBarHidden:NO animated:NO];
     [host removeFromSuperview];
     objc_setAssociatedObject(tabs, &kApolloDuoSplitHostKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(feed, &kApolloDuoSplitOriginalSuperviewKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(feed, &kApolloDuoSplitOriginalFrameKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(feed, &kApolloDuoSplitInsetsClearedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-
-// Confirmed via RE (AsyncDisplayKit's _NodeConstrainedSizeForScrollDirection):
-// Texture derives a table's default per-row constrainedSize from
-// bounds.width minus the scroll view's *adjusted* content inset, which
-// folds in safeAreaInsets. On this dual-screen canvas, a table confined to
-// one physical panel gets a phantom ~84pt trailing safeAreaInsets (matches
-// the hinge/edge exactly) even though it's UIKit/DeviceKit's own inherent
-// value, not something our code sets — contentInsetAdjustmentBehavior
-// doesn't stick against it, and Texture reads the derived inset via a path
-// that bypasses -adjustedContentInset's public getter (hooking it has no
-// effect), so neither approach works. additionalSafeAreaInsets is the
-// documented, supported way to cancel a safe area value UIKit computed on
-// its own — it feeds the real internal computation, not just a getter
-// facade. No one-shot guard: the detail column's caller unconditionally
-// resets additionalSafeAreaInsets to zero every pass before calling this,
-// so re-measuring from that clean baseline each time is correct, not
-// compounding. Once compensated, the measured safeAreaInsets.right reads
-// back near zero and the >0.5 guard below makes this a no-op — a stable
-// fixed point, not drift.
-static BOOL ApolloFeedSplitCancelPhantomTrailingSafeArea(UIViewController *vc) {
-    if (!vc || !vc.isViewLoaded) return NO;
-    CGFloat right = vc.view.safeAreaInsets.right;
-    if (right > 0.5) {
-        UIEdgeInsets extra = vc.additionalSafeAreaInsets;
-        extra.right -= right;
-        vc.additionalSafeAreaInsets = extra;
-        // additionalSafeAreaInsets doesn't propagate into safeAreaInsets
-        // synchronously within this run-loop turn — force it now so the
-        // relayout the caller triggers right after this returns actually
-        // reads the corrected value instead of racing it.
-        [vc.view layoutIfNeeded];
-        ApolloLog(@"[FeedSplit] cancelled phantom trailing safe area %.1f on %@",
-                  right, NSStringFromClass(vc.class));
-        return YES;
-    }
-    return NO;
 }
 
 static void ApolloFeedSplitHideLegacyRail(UITabBarController *tabs) {
@@ -1172,40 +791,12 @@ static void ApolloFeedSplitClearLegacyInsetsInView(UIView *view) {
     }
 }
 
-// Apollo never implements a custom constrainedSize delegate for its
-// IGListKit/Texture-backed tables (confirmed via RE — no
-// -tableNode:constrainedSizeForRow... override exists anywhere in the
-// binary), so Texture's own default per-row measurement is in play, which
-// derives its width from the owning ASTableNode's OWN tracked frame — not
-// from the backing _ASTableView's raw UIKit .frame/.bounds. Setting .frame
-// directly on the view (as this file does throughout, for good reason: it's
-// the only thing directly reachable by walking the UIKit view hierarchy)
-// resizes what's on screen but never tells the ASDisplayNode object itself
-// that its size changed, since Texture expects resizes to go through the
-// node. Call this right after any .frame assignment on a view that might be
-// Texture-backed so the node's own frame — and therefore every measurement
-// pass that reads it — actually reflects the new size.
-static void ApolloFeedSplitSyncNodeFrame(UIView *view) {
-    if (!view) return;
-    SEL nodeSelectors[] = { NSSelectorFromString(@"asyncdisplaykit_node"), NSSelectorFromString(@"node") };
-    for (size_t i = 0; i < sizeof(nodeSelectors) / sizeof(nodeSelectors[0]); i++) {
-        if ([view respondsToSelector:nodeSelectors[i]]) {
-            id node = ((id (*)(id, SEL))objc_msgSend)(view, nodeSelectors[i]);
-            if (node && [node respondsToSelector:@selector(setFrame:)]) {
-                ((void (*)(id, SEL, CGRect))objc_msgSend)(node, @selector(setFrame:), view.frame);
-            }
-            return;
-        }
-    }
-}
-
 static void ApolloFeedSplitFillDetailScrollViews(UIView *view) {
     if (!view) return;
     if ([view isKindOfClass:[UIScrollView class]] && view.superview) {
         UIScrollView *scroll = (UIScrollView *)view;
         view.translatesAutoresizingMaskIntoConstraints = YES;
         view.frame = view.superview.bounds;
-        ApolloFeedSplitSyncNodeFrame(view);
         view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         UIEdgeInsets inset = scroll.contentInset;
         inset.left = 0.0;
@@ -1222,7 +813,6 @@ static void ApolloFeedSplitFillDetailScrollViews(UIView *view) {
             if (!CGRectEqualToRect(child.frame, bounds)) {
                 child.translatesAutoresizingMaskIntoConstraints = YES;
                 child.frame = bounds;
-                ApolloFeedSplitSyncNodeFrame(child);
                 child.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             }
             UIScrollView *scroll = (UIScrollView *)child;
@@ -1383,9 +973,6 @@ static void ApolloFeedSplitEnsure(UITabBarController *tabs) {
 BOOL ApolloFeedSplitEnabled(void) {
     return ApolloDuoSplitIsOpen() && objc_getAssociatedObject(sApolloDuoSplitTabs, &kApolloDuoSplitHostKey) != nil;
 }
-BOOL ApolloFeedSplitSuspended(void) {
-    return sApolloDuoSplitSuspended;
-}
 BOOL ApolloFeedSplitForceTiledActive(void) { return ApolloFeedSplitEnabled(); }
 void ApolloFeedSplitForceTiledForSeconds(NSTimeInterval seconds) { (void)seconds; }
 void ApolloFeedSplitReapplyVisible(void) {
@@ -1456,30 +1043,10 @@ void ApolloFeedSplitShowSubredditPicker(UINavigationController *nav) {
 %end
 %end
 
-// ApolloFeedSplitMaskFeedTransition only fires from our own sidebar's tap
-// handler. Tapping a row directly inside Apollo's native Subreddits
-// directory (Home/Popular/All/a specific subreddit) reaches the same
-// animated IGListKit feed-swap transition through a completely different
-// call path — Apollo's own row selection, never routed through our
-// sidebar — so it was never masked, leaving the same overlap/ghosting
-// glitch visible there.
-%group ApolloDuoFeedSplitListSelection
-%hook _TtC6Apollo24RedditListViewController
-- (void)tableView:(id)tableView didSelectRowAtIndexPath:(id)indexPath {
-    if (ApolloDuoSplitIsOpen()) {
-        ApolloDuoSplitHost *host = objc_getAssociatedObject(sApolloDuoSplitTabs, &kApolloDuoSplitHostKey);
-        if (host) ApolloFeedSplitMaskFeedTransition(host);
-    }
-    %orig;
-}
-%end
-%end
-
 %ctor {
     %init(ApolloDuoFeedSplitTabs);
     if (objc_getClass("ASTableView")) %init(ApolloDuoFeedSplitTable);
     if (objc_getClass("_TtC6Apollo26ApolloNavigationController")) %init(ApolloDuoFeedSplitNavigation);
-    if (objc_getClass("_TtC6Apollo24RedditListViewController")) %init(ApolloDuoFeedSplitListSelection);
     ApolloLog(@"[FeedSplit] open Duo three-pane host installed");
     dispatch_async(dispatch_get_main_queue(), ^{
         ApolloFeedSplitRetryFromLaunch(0);

@@ -33,6 +33,7 @@
 #import "UIWindow+Apollo.h"
 
 void ApolloSubredditIndexDebugDescribeTables(void); // ApolloSubredditIndexPolish.xm (sim-only)
+void ApolloSubredditIndexDebugDescribeRowHeights(void); // ApolloSubredditIndexPolish.xm (sim-only)
 #import <objc/message.h>
 #import <mach/mach.h>
 
@@ -827,6 +828,13 @@ static void ApolloSimDebugTapNotification(CFNotificationCenterRef center, void *
         // ApolloSubredditIndexDebugDescribeTables in ApolloSubredditIndexPolish.
         if ([contents hasPrefix:@"indexdiag"]) {
             ApolloSubredditIndexDebugDescribeTables();
+            return;
+        }
+        // "rowdiag" command: log title + measured height for every visible
+        // subreddit-list row, to correlate a named row with an anomalous
+        // self-sizing height (Duo Closed row-spacing bug).
+        if ([contents hasPrefix:@"rowdiag"]) {
+            ApolloSubredditIndexDebugDescribeRowHeights();
             return;
         }
         // "headerstyle N" command: switch the Header Style setting through the

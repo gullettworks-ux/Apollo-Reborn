@@ -71,6 +71,10 @@ static void (*orig_ApolloRedditListWillDisplayCell)(id self, SEL _cmd, UITableVi
 static CGFloat (*orig_ApolloRedditListHeightForRow)(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) = NULL;
 static void (*orig_ApolloSubredditHeaderLayoutSubviews)(id self, SEL _cmd) = NULL;
 static void (*orig_ApolloSubredditHeaderSetFrame)(id self, SEL _cmd, CGRect frame) = NULL;
+#if APOLLO_SIM_BUILD
+static void (*orig_ApolloRedditListDidEndDisplayingCell)(id self, SEL _cmd, UITableView *tableView, UITableViewCell *cell, NSIndexPath *indexPath) = NULL;
+static void (*orig_ApolloRedditListCellPrepareForReuse)(id self, SEL _cmd) = NULL;
+#endif
 
 static const CGFloat ApolloSubredditIndexSlotHeight = 14.0;
 static const CGFloat ApolloSubredditIndexTouchWidth = 56.0;
@@ -1191,6 +1195,22 @@ static NSString *ApolloSubredditIndexCellTitle(UITableViewCell *cell) {
     title = [label.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     return title.length > 0 ? title : nil;
 }
+
+#if APOLLO_SIM_BUILD
+// Sim-only cell-lifecycle trace, chasing the "rows disappear while keeping
+// their height" bug reported after clicking/scrubbing around the Duo Closed
+// Subreddits list (rapid A-Z index scrubbing forces heavy cell reuse). Logs
+// title + cell height at prepareForReuse / willDisplayCell /
+// didEndDisplayingCell so we can see exactly where a cell's content clears
+// without its height following, per index path.
+static void ApolloSubredditIndexLogCellLifecycle(NSString *event, UITableView *tableView, UITableViewCell *cell, NSIndexPath *indexPath) {
+    if (!cell) return;
+    if (!indexPath) indexPath = tableView ? [tableView indexPathForCell:cell] : nil;
+    ApolloLog(@"[SubredditIndex][celltrace] %@ sec=%ld row=%ld title=%@ cellH=%.1f ptr=%p",
+              event, (long)indexPath.section, (long)indexPath.row,
+              ApolloSubredditIndexCellTitle(cell), CGRectGetHeight(cell.bounds), cell);
+}
+#endif
 
 static UIControl *ApolloSubredditIndexFindStarControlInView(UIView *view, UITableViewCell *cell) {
     if (!view || !cell) return nil;
@@ -2499,8 +2519,32 @@ static void ApolloSubredditIndexWillDisplayCellHook(id self, SEL _cmd, UITableVi
     if (orig_ApolloRedditListWillDisplayCell) {
         orig_ApolloRedditListWillDisplayCell(self, _cmd, tableView, cell, indexPath);
     }
+#if APOLLO_SIM_BUILD
+    ApolloSubredditIndexLogCellLifecycle(@"willDisplay-before-prepare", tableView, cell, indexPath);
+#endif
     ApolloSubredditIndexPrepareCellForDisplay(tableView, cell, indexPath);
+#if APOLLO_SIM_BUILD
+    ApolloSubredditIndexLogCellLifecycle(@"willDisplay-after-prepare", tableView, cell, indexPath);
+#endif
 }
+
+#if APOLLO_SIM_BUILD
+static void ApolloSubredditIndexDidEndDisplayingCellHook(id self, SEL _cmd, UITableView *tableView, UITableViewCell *cell, NSIndexPath *indexPath) {
+    ApolloSubredditIndexLogCellLifecycle(@"didEndDisplaying", tableView, cell, indexPath);
+    if (orig_ApolloRedditListDidEndDisplayingCell) {
+        orig_ApolloRedditListDidEndDisplayingCell(self, _cmd, tableView, cell, indexPath);
+    }
+}
+
+static void ApolloSubredditIndexCellPrepareForReuseHook(id self, SEL _cmd) {
+    UITableViewCell *cell = (UITableViewCell *)self;
+    ApolloSubredditIndexLogCellLifecycle(@"prepareForReuse-before", nil, cell, nil);
+    if (orig_ApolloRedditListCellPrepareForReuse) {
+        orig_ApolloRedditListCellPrepareForReuse(self, _cmd);
+    }
+    ApolloSubredditIndexLogCellLifecycle(@"prepareForReuse-after", nil, cell, nil);
+}
+#endif
 
 static CGFloat ApolloSubredditIndexHeightForRowHook(id self, SEL _cmd, UITableView *tableView, NSIndexPath *indexPath) {
     if (indexPath.section == 0 && indexPath.row < 4) {
@@ -2574,6 +2618,77 @@ static void ApolloSubredditIndexInstallCellDisplayHook(void) {
         ApolloLog(@"[SubredditIndex] cell display hook installed via add=%d on %@", added, NSStringFromClass(cls));
     }
 }
+
+#if APOLLO_SIM_BUILD
+static void ApolloSubredditIndexInstallDidEndDisplayingHook(void) {
+    Class cls = ApolloSubredditIndexRedditListViewControllerClass();
+    if (!cls) {
+        ApolloLog(@"[SubredditIndex] celltrace didEndDisplaying hook skipped: RedditListViewController missing");
+        return;
+    }
+    SEL selector = @selector(tableView:didEndDisplayingCell:forRowAtIndexPath:);
+    Method method = class_getInstanceMethod(cls, selector);
+    IMP hook = (IMP)ApolloSubredditIndexDidEndDisplayingCellHook;
+    if (method) {
+        orig_ApolloRedditListDidEndDisplayingCell = (void (*)(id, SEL, UITableView *, UITableViewCell *, NSIndexPath *))method_getImplementation(method);
+        method_setImplementation(method, hook);
+        ApolloLog(@"[SubredditIndex] celltrace didEndDisplaying hook installed via replace on %@", NSStringFromClass(cls));
+    } else {
+        BOOL added = class_addMethod(cls, selector, hook, "v@:@@@");
+        ApolloLog(@"[SubredditIndex] celltrace didEndDisplaying hook installed via add=%d on %@", added, NSStringFromClass(cls));
+    }
+}
+
+static void ApolloSubredditIndexInstallCellPrepareForReuseHook(void) {
+    Class cls = ApolloSubredditIndexRedditListTableViewCellClass();
+    if (!cls) {
+        ApolloLog(@"[SubredditIndex] celltrace prepareForReuse hook skipped: RedditListTableViewCell missing");
+        return;
+    }
+    SEL selector = @selector(prepareForReuse);
+    IMP hook = (IMP)ApolloSubredditIndexCellPrepareForReuseHook;
+
+    // class_getInstanceMethod() may return UITableViewCell's inherited Method.
+    // Calling method_setImplementation() on that object would replace the
+    // shared superclass implementation, changing prepareForReuse for every
+    // cell class in the process. Find an implementation owned by this exact
+    // class; if it inherits one, add a local override and call the inherited
+    // IMP directly from the tracer.
+    Method ownMethod = NULL;
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(cls, &methodCount);
+    for (unsigned int idx = 0; idx < methodCount; idx++) {
+        if (method_getName(methods[idx]) == selector) {
+            ownMethod = methods[idx];
+            break;
+        }
+    }
+
+    if (ownMethod) {
+        orig_ApolloRedditListCellPrepareForReuse = (void (*)(id, SEL))method_getImplementation(ownMethod);
+        method_setImplementation(ownMethod, hook);
+        free(methods);
+        ApolloLog(@"[SubredditIndex] celltrace prepareForReuse hook replaced class-owned method on %@", NSStringFromClass(cls));
+        return;
+    }
+
+    Method inheritedMethod = class_getInstanceMethod(cls, selector);
+    if (!inheritedMethod) {
+        free(methods);
+        ApolloLog(@"[SubredditIndex] celltrace prepareForReuse hook skipped: method missing on %@", NSStringFromClass(cls));
+        return;
+    }
+    orig_ApolloRedditListCellPrepareForReuse = (void (*)(id, SEL))method_getImplementation(inheritedMethod);
+    const char *types = method_getTypeEncoding(inheritedMethod);
+    BOOL added = class_addMethod(cls, selector, hook, types ?: "v@:");
+    free(methods);
+    if (!added) {
+        orig_ApolloRedditListCellPrepareForReuse = NULL;
+    }
+    ApolloLog(@"[SubredditIndex] celltrace prepareForReuse hook installed as local override added=%d on %@",
+              added, NSStringFromClass(cls));
+}
+#endif
 
 static void ApolloSubredditIndexInstallRowHeightHook(void) {
     Class cls = ApolloSubredditIndexRedditListViewControllerClass();
@@ -3433,6 +3548,29 @@ void ApolloSubredditIndexDebugDescribeTables(void) {
         }
     }
 }
+
+// Sim debug bridge ("rowdiag"): log title + measured frame height for every
+// visible row in every known subreddit table, to correlate a specific named
+// row with an anomalous self-sizing height (Duo Closed row-spacing bug).
+void ApolloSubredditIndexDebugDescribeRowHeights(void);
+void ApolloSubredditIndexDebugDescribeRowHeights(void) {
+    NSArray<UITableView *> *tables = sApolloSubredditKnownTables.allObjects;
+    for (UITableView *tableView in tables) {
+        ApolloLog(@"[SubredditIndex][rowdiag] table=%p width=%.1f rowHeight=%.1f estimated=%.1f",
+                  tableView, CGRectGetWidth(tableView.bounds),
+                  tableView.rowHeight, tableView.estimatedRowHeight);
+        for (UITableViewCell *cell in tableView.visibleCells) {
+            NSIndexPath *path = [tableView indexPathForCell:cell];
+            UILabel *titleLabel = ApolloSubredditIndexBestTitleLabelInView(cell.contentView ?: cell, cell);
+            CGRect labelFrame = titleLabel ? [cell convertRect:titleLabel.bounds fromView:titleLabel] : CGRectZero;
+            ApolloLog(@"[SubredditIndex][rowdiag]   sec=%ld row=%ld title=%@ class=%@ cellH=%.1f contentH=%.1f labelY=%.1f labelH=%.1f",
+                      (long)path.section, (long)path.row, ApolloSubredditIndexCellTitle(cell),
+                      NSStringFromClass(cell.class), CGRectGetHeight(cell.bounds),
+                      CGRectGetHeight(cell.contentView.bounds),
+                      CGRectGetMinY(labelFrame), CGRectGetHeight(labelFrame));
+        }
+    }
+}
 #endif
 
 %ctor {
@@ -3441,6 +3579,10 @@ void ApolloSubredditIndexDebugDescribeTables(void) {
     ApolloSubredditIndexInstallRowHeightHook();
     ApolloSubredditIndexInstallHeaderLayoutHook();
     ApolloSubredditIndexInstallHeaderSetFrameHook();
+#if APOLLO_SIM_BUILD
+    ApolloSubredditIndexInstallDidEndDisplayingHook();
+    ApolloSubredditIndexInstallCellPrepareForReuseHook();
+#endif
     [[NSNotificationCenter defaultCenter] addObserverForName:ApolloModernSubredditDividersChangedNotification
                                                       object:nil
                                                        queue:[NSOperationQueue mainQueue]
