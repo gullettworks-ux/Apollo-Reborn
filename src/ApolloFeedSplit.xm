@@ -756,6 +756,12 @@ static void ApolloFeedSplitDetach(UITabBarController *tabs) {
             feed.view.frame = savedFrame ? savedFrame.CGRectValue : original.bounds;
         }
     }
+    // feed is Apollo's own real navigation controller, shared with
+    // Closed/Phone posture -- layoutColumns hides its navigation bar to make
+    // room for the book-layout header while Open, but nothing else ever sets
+    // it back. Left hidden, Closed/portrait loses its back button and title
+    // bar entirely, since it's the same controller instance.
+    [feed setNavigationBarHidden:NO animated:NO];
     [host removeFromSuperview];
     objc_setAssociatedObject(tabs, &kApolloDuoSplitHostKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(feed, &kApolloDuoSplitOriginalSuperviewKey, nil, OBJC_ASSOCIATION_ASSIGN);
