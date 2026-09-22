@@ -20,6 +20,7 @@ static BOOL sApolloDuoSplitAttaching = NO;
 static __weak UITabBarController *sApolloDuoSplitTabs = nil;
 static NSUInteger sApolloDuoSplitAttachRetries = 0;
 static char kApolloDuoSplitRelayoutKey;
+static char kApolloDuoSplitFeedRelayoutKey;
 // Profile and Settings are whole tabs, not panes. While one of them is
 // showing, the split host steps aside (stock tabs plus the rail take over)
 // until the user returns to the feed tab.
@@ -30,6 +31,7 @@ static void ApolloFeedSplitOpenHomeFeed(UINavigationController *nav);
 static void ApolloFeedSplitFillDetailScrollViews(UIView *view);
 static void ApolloFeedSplitWidenDetailSoon(void);
 static void ApolloFeedSplitDetach(UITabBarController *tabs);
+static BOOL ApolloFeedSplitCancelPhantomTrailingSafeArea(UIViewController *vc);
 static BOOL ApolloFeedSplitHandleUtility(ApolloDuoSplitHost *host, NSString *title);
 static void ApolloFeedSplitLogDetailFrames(ApolloDuoSplitHost *host);
 static void ApolloFeedSplitDumpDetailTree(UIView *view, CGFloat targetWidth, NSInteger depth);
@@ -632,6 +634,14 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
         // after the navigation controller lays out. Widen the complete
         // hierarchy, including the root when it is itself a scroll view.
         detailVisible.view.bounds = detailBounds;
+        // additionalSafeAreaInsets was just zeroed above, but the view can
+        // still report a nonzero safeAreaInsets.right of its own (dual-screen
+        // canvas) -- catch that here so already-measured Texture rows get a
+        // forced relayout instead of staying narrow.
+        if (ApolloFeedSplitCancelPhantomTrailingSafeArea(detailVisible)) {
+            objc_setAssociatedObject(self, &kApolloDuoSplitRelayoutKey, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         ApolloFeedSplitFillDetailScrollViews(detailVisible.view);
         ApolloFeedSplitWidenTableCells(detailVisible.view, 0.0);
         NSString *relayoutKey = [NSString stringWithFormat:@"%p-%.0f", detailVisible,
@@ -668,6 +678,40 @@ static UIView *ApolloDuoSplitBuildSidebar(ApolloDuoSplitHost *host) {
             if (visibleFrameChanged) visible.view.frame = visibleFrame;
             visible.view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             if (feedFrameChanged || visibleFrameChanged) [visible.view setNeedsLayout];
+            // The detail/comments column gets the widen treatment above; the
+            // feed column didn't, so its native post rows stayed sized for
+            // whatever narrower width they were last measured at -- content
+            // (thumbnail, text) packed to the left with a dead gap before the
+            // column's actual right edge instead of filling it. Skip the
+            // Subreddits list specifically: it's a plain self-sizing
+            // UITableView (not Texture), and ApolloFeedSplitWidenTableCells's
+            // direct cell.frame writes fight its self-sizing, reproducing the
+            // erratic per-row heights already root-caused and fixed
+            // elsewhere for that screen.
+            Class redditListClass = objc_getClass("_TtC6Apollo24RedditListViewController");
+            BOOL visibleIsSubredditsList = redditListClass && [visible isKindOfClass:redditListClass];
+            if (!visibleIsSubredditsList) {
+                visible.additionalSafeAreaInsets = UIEdgeInsetsZero;
+                if (ApolloFeedSplitCancelPhantomTrailingSafeArea(visible)) {
+                    objc_setAssociatedObject(self, &kApolloDuoSplitFeedRelayoutKey, nil,
+                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                }
+                ApolloFeedSplitFillDetailScrollViews(visible.view);
+                ApolloFeedSplitWidenTableCells(visible.view, 0.0);
+                NSString *feedRelayoutKey = [NSString stringWithFormat:@"%p-%.0f", visible,
+                                             CGRectGetWidth(visibleFrame)];
+                if (![feedRelayoutKey isEqualToString:objc_getAssociatedObject(self, &kApolloDuoSplitFeedRelayoutKey)]) {
+                    objc_setAssociatedObject(self, &kApolloDuoSplitFeedRelayoutKey, feedRelayoutKey,
+                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    ApolloFeedSplitRelayoutTables(visible.view);
+                    __weak UIViewController *weakVisible = visible;
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), ^{
+                        UIViewController *strongVisible = weakVisible;
+                        if (strongVisible.isViewLoaded) ApolloFeedSplitRelayoutTables(strongVisible.view);
+                    });
+                }
+            }
         }
     }
     ApolloFeedSplitLogDetailFrames(self);
@@ -767,6 +811,33 @@ static void ApolloFeedSplitDetach(UITabBarController *tabs) {
     objc_setAssociatedObject(feed, &kApolloDuoSplitOriginalSuperviewKey, nil, OBJC_ASSOCIATION_ASSIGN);
     objc_setAssociatedObject(feed, &kApolloDuoSplitOriginalFrameKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(feed, &kApolloDuoSplitInsetsClearedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// A dual-screen canvas leaves a phantom trailing safe-area inset that
+// silently narrows Texture's default per-row constrainedSize on the feed and
+// comments columns, packing content (thumbnails, text) to the left with a
+// dead gap before the column's actual right edge instead of filling it.
+// UIKit resets additionalSafeAreaInsets on its own view-controller lifecycle
+// timing (e.g. leaving and returning to this tab), so a safe area that was
+// already cancelled can come back -- callers reapply this every layout pass
+// rather than once.
+static BOOL ApolloFeedSplitCancelPhantomTrailingSafeArea(UIViewController *vc) {
+    if (!vc || !vc.isViewLoaded) return NO;
+    CGFloat right = vc.view.safeAreaInsets.right;
+    if (right > 0.5) {
+        UIEdgeInsets extra = vc.additionalSafeAreaInsets;
+        extra.right -= right;
+        vc.additionalSafeAreaInsets = extra;
+        // additionalSafeAreaInsets doesn't propagate into safeAreaInsets
+        // synchronously within this run-loop turn -- force it now so the
+        // relayout the caller triggers right after this returns actually
+        // reads the corrected value instead of racing it.
+        [vc.view layoutIfNeeded];
+        ApolloLog(@"[FeedSplit] cancelled phantom trailing safe area %.1f on %@",
+                  right, NSStringFromClass(vc.class));
+        return YES;
+    }
+    return NO;
 }
 
 static void ApolloFeedSplitHideLegacyRail(UITabBarController *tabs) {
